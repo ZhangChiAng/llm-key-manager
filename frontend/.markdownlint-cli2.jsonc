@@ -1,0 +1,15 @@
+{
+  "config": {
+    "MD013": false
+  },
+  "globs": [
+    "../*.md",
+    "*.md",
+    "src/**/*.md"
+  ],
+  "ignores": [
+    "node_modules",
+    "dist",
+    "wailsjs"
+  ]
+}
