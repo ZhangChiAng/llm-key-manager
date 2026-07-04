@@ -174,7 +174,28 @@ tbody tr:last-child td {
 }
 
 .table-actions {
-  width: 128px;
+  width: 180px;
+  white-space: nowrap;
+}
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 40px;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
   white-space: nowrap;
 }
 
@@ -192,9 +213,14 @@ tbody tr:last-child td {
 
   .panel-header,
   .table-header,
-  .form-actions {
+  .form-actions,
+  .dialog-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .dialog-buttons {
+    justify-content: stretch;
   }
 
   .key-form {

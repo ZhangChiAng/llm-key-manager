@@ -17,3 +17,7 @@ export function ListKeys() {
 export function SaveKey(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveKey'](arg1, arg2, arg3);
 }
+
+export function UpdateKey(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['UpdateKey'](arg1, arg2, arg3, arg4);
+}

@@ -1,6 +1,6 @@
 <script lang="ts" setup>
-import { onMounted, reactive, ref } from 'vue'
-import { CopyKey, DeleteKey, ListKeys, SaveKey } from '../wailsjs/go/main/App'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { CopyKey, DeleteKey, ListKeys, SaveKey, UpdateKey } from '../wailsjs/go/main/App'
 import type { main } from '../wailsjs/go/models'
 
 const form = reactive({
@@ -9,13 +9,32 @@ const form = reactive({
   value: '',
 })
 
+const editForm = reactive({
+  id: '',
+  provider: '',
+  name: '',
+  value: '',
+})
+
 const keys = ref<main.KeyRecord[]>([])
 const errorMessage = ref('')
 const successMessage = ref('')
+const editErrorMessage = ref('')
 const isSaving = ref(false)
 const isLoading = ref(false)
+const isEditDialogVisible = ref(false)
+const isUpdating = ref(false)
 const copyingKeyId = ref('')
 const deletingKeyId = ref('')
+const originalEditProvider = ref('')
+const originalEditName = ref('')
+
+const isEditUnchanged = computed(
+  () =>
+    editForm.provider.trim() === originalEditProvider.value.trim() &&
+    editForm.name.trim() === originalEditName.value.trim() &&
+    editForm.value.trim() === '',
+)
 
 /**
  * Reloads key records from the Wails backend so the table reflects the local
@@ -60,6 +79,62 @@ async function saveKey() {
     errorMessage.value = getErrorMessage(error, '保存 Key 失败')
   } finally {
     isSaving.value = false
+  }
+}
+
+/**
+ * Opens the edit dialog with editable metadata only; key content stays blank so
+ * plaintext key material is not requested from the backend.
+ */
+function openEditDialog(record: main.KeyRecord) {
+  errorMessage.value = ''
+  successMessage.value = ''
+  editErrorMessage.value = ''
+  editForm.id = record.id
+  editForm.provider = record.provider
+  editForm.name = record.name
+  editForm.value = ''
+  originalEditProvider.value = record.provider
+  originalEditName.value = record.name
+  isEditDialogVisible.value = true
+}
+
+/**
+ * Clears edit state after the dialog has closed.
+ */
+function resetEditForm() {
+  editForm.id = ''
+  editForm.provider = ''
+  editForm.name = ''
+  editForm.value = ''
+  originalEditProvider.value = ''
+  originalEditName.value = ''
+  editErrorMessage.value = ''
+}
+
+/**
+ * Updates metadata and replaces the encrypted key value only when the user
+ * entered new key content.
+ */
+async function updateKey() {
+  editErrorMessage.value = ''
+
+  if (!editForm.id || !editForm.provider.trim() || !editForm.name.trim()) {
+    editErrorMessage.value = '请填写提供商和 Key 名称'
+    return
+  }
+
+  isUpdating.value = true
+
+  try {
+    await UpdateKey(editForm.id, editForm.provider, editForm.name, editForm.value)
+    isEditDialogVisible.value = false
+    await refreshKeys()
+    successMessage.value = 'Key 已更新'
+  } catch (error) {
+    editErrorMessage.value = getErrorMessage(error, '更新 Key 失败')
+  } finally {
+    isUpdating.value = false
   }
 }
 
@@ -183,6 +258,7 @@ onMounted(refreshKeys)
               <th>名称</th>
               <th>Key 内容</th>
               <th>创建时间</th>
+              <th>更新时间</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -192,7 +268,11 @@ onMounted(refreshKeys)
               <td>{{ record.name }}</td>
               <td class="key-value">{{ record.maskedValue }}</td>
               <td>{{ formatDate(record.createdAt) }}</td>
+              <td>{{ formatDate(record.updatedAt) }}</td>
               <td class="table-actions">
+                <t-button theme="default" variant="text" size="small" @click="openEditDialog(record)">
+                  编辑
+                </t-button>
                 <t-button
                   theme="primary"
                   variant="text"
@@ -222,5 +302,50 @@ onMounted(refreshKeys)
         </table>
       </div>
     </section>
+
+    <t-dialog
+      v-model:visible="isEditDialogVisible"
+      header="编辑 Key"
+      width="520px"
+      :footer="false"
+      :close-on-overlay-click="!isUpdating"
+      :close-on-esc-keydown="!isUpdating"
+      @closed="resetEditForm"
+    >
+      <form class="edit-form" @submit.prevent="updateKey">
+        <label class="field">
+          <span>提供商</span>
+          <t-input v-model="editForm.provider" placeholder="DeepSeek / OfoxAI" clearable />
+        </label>
+
+        <label class="field">
+          <span>Key 名称</span>
+          <t-input v-model="editForm.name" placeholder="Chatbox / OpenCode" clearable />
+        </label>
+
+        <label class="field">
+          <span>Key 内容</span>
+          <t-input v-model="editForm.value" placeholder="留空表示不修改" clearable />
+        </label>
+
+        <div class="dialog-actions">
+          <p v-if="editErrorMessage" class="error-message">{{ editErrorMessage }}</p>
+          <span v-else></span>
+          <div class="dialog-buttons">
+            <t-button variant="outline" :disabled="isUpdating" @click="isEditDialogVisible = false">
+              取消
+            </t-button>
+            <t-button
+              theme="primary"
+              type="submit"
+              :disabled="isUpdating || isEditUnchanged"
+              :loading="isUpdating"
+            >
+              保存
+            </t-button>
+          </div>
+        </div>
+      </form>
+    </t-dialog>
   </main>
 </template>
