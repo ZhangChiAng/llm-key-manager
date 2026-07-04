@@ -4,7 +4,7 @@ export namespace main {
 	    id: string;
 	    provider: string;
 	    name: string;
-	    value: string;
+	    maskedValue: string;
 	    createdAt: string;
 	
 	    static createFrom(source: any = {}) {
@@ -16,7 +16,7 @@ export namespace main {
 	        this.id = source["id"];
 	        this.provider = source["provider"];
 	        this.name = source["name"];
-	        this.value = source["value"];
+	        this.maskedValue = source["maskedValue"];
 	        this.createdAt = source["createdAt"];
 	    }
 	}

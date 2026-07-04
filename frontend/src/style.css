@@ -126,6 +126,10 @@ h2 {
   color: #c0362c;
 }
 
+.success-message {
+  color: #067647;
+}
+
 .table-panel {
   overflow: hidden;
 }
@@ -170,7 +174,7 @@ tbody tr:last-child td {
 }
 
 .table-actions {
-  width: 88px;
+  width: 128px;
   white-space: nowrap;
 }
 

@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { onMounted, reactive, ref } from 'vue'
-import { DeleteKey, ListKeys, SaveKey } from '../wailsjs/go/main/App'
+import { CopyKey, DeleteKey, ListKeys, SaveKey } from '../wailsjs/go/main/App'
 import type { main } from '../wailsjs/go/models'
 
 const form = reactive({
@@ -11,17 +11,20 @@ const form = reactive({
 
 const keys = ref<main.KeyRecord[]>([])
 const errorMessage = ref('')
+const successMessage = ref('')
 const isSaving = ref(false)
 const isLoading = ref(false)
+const copyingKeyId = ref('')
 const deletingKeyId = ref('')
 
 /**
  * Reloads key records from the Wails backend so the table reflects the local
- * plaintext key store on disk.
+ * encrypted key store on disk.
  */
 async function refreshKeys() {
   isLoading.value = true
   errorMessage.value = ''
+  successMessage.value = ''
 
   try {
     keys.value = await ListKeys()
@@ -38,6 +41,7 @@ async function refreshKeys() {
  */
 async function saveKey() {
   errorMessage.value = ''
+  successMessage.value = ''
 
   if (!form.provider.trim() || !form.name.trim() || !form.value.trim()) {
     errorMessage.value = '请填写提供商、Key 名称和 Key 内容'
@@ -60,11 +64,31 @@ async function saveKey() {
 }
 
 /**
+ * Requests a backend clipboard copy so plaintext key material is never returned
+ * to the frontend.
+ */
+async function copyKey(record: main.KeyRecord) {
+  errorMessage.value = ''
+  successMessage.value = ''
+  copyingKeyId.value = record.id
+
+  try {
+    await CopyKey(record.id)
+    successMessage.value = 'Key 已复制到剪贴板'
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error, '复制 Key 失败')
+  } finally {
+    copyingKeyId.value = ''
+  }
+}
+
+/**
  * Removes a saved key record after the user confirms the row-level delete
  * prompt, then reloads records from the backend store.
  */
 async function deleteKey(record: main.KeyRecord) {
   errorMessage.value = ''
+  successMessage.value = ''
   deletingKeyId.value = record.id
 
   try {
@@ -111,7 +135,7 @@ onMounted(refreshKeys)
       <div class="panel-header">
         <div>
           <h1>LLM Key Manager</h1>
-          <p>本地明文保存和查看 API Key。</p>
+          <p>本地加密保存 API Key。</p>
         </div>
         <t-button theme="default" variant="outline" :loading="isLoading" @click="refreshKeys">
           刷新
@@ -136,6 +160,8 @@ onMounted(refreshKeys)
 
         <div class="form-actions">
           <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
+          <p v-else-if="successMessage" class="success-message">{{ successMessage }}</p>
+          <span v-else></span>
           <t-button theme="primary" type="submit" :loading="isSaving">保存</t-button>
         </div>
       </form>
@@ -164,9 +190,18 @@ onMounted(refreshKeys)
             <tr v-for="record in keys" :key="record.id">
               <td>{{ record.provider }}</td>
               <td>{{ record.name }}</td>
-              <td class="key-value">{{ record.value }}</td>
+              <td class="key-value">{{ record.maskedValue }}</td>
               <td>{{ formatDate(record.createdAt) }}</td>
               <td class="table-actions">
+                <t-button
+                  theme="primary"
+                  variant="text"
+                  size="small"
+                  :loading="copyingKeyId === record.id"
+                  @click="copyKey(record)"
+                >
+                  复制
+                </t-button>
                 <t-popconfirm
                   content="确认删除这条 Key 记录？"
                   theme="danger"
