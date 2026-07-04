@@ -17,7 +17,7 @@ This is a Windows-only Wails desktop app with a Go backend and Vue 3/TypeScript 
 - `cd frontend && npm run format`: check formatting for Vue, TypeScript, CSS, Markdown, and root Markdown docs.
 - `GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...`: run Go lint checks from `.golangci.yml`.
 - `GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64`: run a full Windows Wails build check.
-- `wails generate module`: regenerate `frontend/wailsjs` after changing exported backend method signatures.
+- `GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails generate module`: regenerate `frontend/wailsjs` after changing exported backend method signatures.
 
 Avoid `wails dev` on headless remote Linux hosts because it opens a desktop window.
 
