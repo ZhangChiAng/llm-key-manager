@@ -6,6 +6,7 @@ export namespace main {
 	    name: string;
 	    maskedValue: string;
 	    createdAt: string;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new KeyRecord(source);
@@ -18,6 +19,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.maskedValue = source["maskedValue"];
 	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	    }
 	}
 

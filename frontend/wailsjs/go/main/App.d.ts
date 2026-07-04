@@ -9,3 +9,5 @@ export function DeleteKey(arg1:string):Promise<void>;
 export function ListKeys():Promise<Array<main.KeyRecord>>;
 
 export function SaveKey(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function UpdateKey(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;

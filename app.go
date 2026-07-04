@@ -32,6 +32,8 @@ type KeyRecord struct {
 	MaskedValue string `json:"maskedValue"`
 	// CreatedAt records when the key was saved in RFC3339 format.
 	CreatedAt string `json:"createdAt"`
+	// UpdatedAt records when the key metadata or encrypted value last changed in RFC3339 format.
+	UpdatedAt string `json:"updatedAt"`
 }
 
 type storedKeyRecord struct {
@@ -40,6 +42,7 @@ type storedKeyRecord struct {
 	Name           string `json:"name"`
 	EncryptedValue string `json:"encryptedValue"`
 	CreatedAt      string `json:"createdAt"`
+	UpdatedAt      string `json:"updatedAt"`
 }
 
 // NewApp creates a new App application struct
@@ -74,12 +77,14 @@ func (a *App) SaveKey(provider string, name string, value string) error {
 	}
 
 	now := time.Now()
+	timestamp := now.Format(time.RFC3339)
 	records = append(records, storedKeyRecord{
 		ID:             strconv.FormatInt(now.UnixNano(), 10),
 		Provider:       provider,
 		Name:           name,
 		EncryptedValue: base64.StdEncoding.EncodeToString(protectedValue),
-		CreatedAt:      now.Format(time.RFC3339),
+		CreatedAt:      timestamp,
+		UpdatedAt:      timestamp,
 	})
 
 	return writeStoredKeys(records)
@@ -105,10 +110,56 @@ func (a *App) ListKeys() ([]KeyRecord, error) {
 			Name:        record.Name,
 			MaskedValue: maskKeyValue(value),
 			CreatedAt:   record.CreatedAt,
+			UpdatedAt:   record.UpdatedAt,
 		})
 	}
 
 	return records, nil
+}
+
+// UpdateKey updates key metadata and optionally replaces the encrypted key value.
+func (a *App) UpdateKey(id string, provider string, name string, value string) error {
+	id = strings.TrimSpace(id)
+	provider = strings.TrimSpace(provider)
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
+
+	if id == "" || provider == "" || name == "" {
+		return errors.New("key record ID, provider, and name are required")
+	}
+
+	records, err := readStoredKeys()
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for index, record := range records {
+		if record.ID != id {
+			continue
+		}
+
+		if value != "" {
+			protectedValue, err := protectKeyValue(value)
+			if err != nil {
+				return err
+			}
+			record.EncryptedValue = base64.StdEncoding.EncodeToString(protectedValue)
+		}
+
+		record.Provider = provider
+		record.Name = name
+		record.UpdatedAt = time.Now().Format(time.RFC3339)
+		records[index] = record
+		found = true
+		break
+	}
+
+	if !found {
+		return errors.New("key record not found")
+	}
+
+	return writeStoredKeys(records)
 }
 
 // CopyKey decrypts the saved API key and writes the plaintext to the clipboard.
@@ -220,7 +271,8 @@ func validateStoredKeys(records []storedKeyRecord) error {
 			strings.TrimSpace(record.Provider) == "" ||
 			strings.TrimSpace(record.Name) == "" ||
 			strings.TrimSpace(record.EncryptedValue) == "" ||
-			strings.TrimSpace(record.CreatedAt) == "" {
+			strings.TrimSpace(record.CreatedAt) == "" ||
+			strings.TrimSpace(record.UpdatedAt) == "" {
 			return fmt.Errorf("invalid encrypted key store record at index %d", index)
 		}
 	}
