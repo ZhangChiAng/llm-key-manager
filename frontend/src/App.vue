@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { CopyKey, DeleteKey, ListKeys, SaveKey, UpdateKey } from '../wailsjs/go/main/App'
 import type { main } from '../wailsjs/go/models'
 
@@ -26,6 +26,15 @@ const isEditDialogVisible = ref(false)
 const isUpdating = ref(false)
 const copyingKeyId = ref('')
 const deletingKeyId = ref('')
+const originalEditProvider = ref('')
+const originalEditName = ref('')
+
+const isEditUnchanged = computed(
+  () =>
+    editForm.provider.trim() === originalEditProvider.value.trim() &&
+    editForm.name.trim() === originalEditName.value.trim() &&
+    editForm.value.trim() === '',
+)
 
 /**
  * Reloads key records from the Wails backend so the table reflects the local
@@ -85,6 +94,8 @@ function openEditDialog(record: main.KeyRecord) {
   editForm.provider = record.provider
   editForm.name = record.name
   editForm.value = ''
+  originalEditProvider.value = record.provider
+  originalEditName.value = record.name
   isEditDialogVisible.value = true
 }
 
@@ -96,6 +107,8 @@ function resetEditForm() {
   editForm.provider = ''
   editForm.name = ''
   editForm.value = ''
+  originalEditProvider.value = ''
+  originalEditName.value = ''
   editErrorMessage.value = ''
 }
 
@@ -322,7 +335,14 @@ onMounted(refreshKeys)
             <t-button variant="outline" :disabled="isUpdating" @click="isEditDialogVisible = false">
               取消
             </t-button>
-            <t-button theme="primary" type="submit" :loading="isUpdating">保存</t-button>
+            <t-button
+              theme="primary"
+              type="submit"
+              :disabled="isUpdating || isEditUnchanged"
+              :loading="isUpdating"
+            >
+              保存
+            </t-button>
           </div>
         </div>
       </form>

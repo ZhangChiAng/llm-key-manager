@@ -71,6 +71,10 @@ func (a *App) SaveKey(provider string, name string, value string) error {
 		return err
 	}
 
+	if err := ensureUniqueKeyRecord(records, "", provider, name, value); err != nil {
+		return err
+	}
+
 	protectedValue, err := protectKeyValue(value)
 	if err != nil {
 		return err
@@ -133,31 +137,53 @@ func (a *App) UpdateKey(id string, provider string, name string, value string) e
 		return err
 	}
 
-	found := false
+	recordIndex := -1
+	var currentRecord storedKeyRecord
 	for index, record := range records {
 		if record.ID != id {
 			continue
 		}
 
-		if value != "" {
-			protectedValue, err := protectKeyValue(value)
-			if err != nil {
-				return err
-			}
-			record.EncryptedValue = base64.StdEncoding.EncodeToString(protectedValue)
-		}
-
-		record.Provider = provider
-		record.Name = name
-		record.UpdatedAt = time.Now().Format(time.RFC3339)
-		records[index] = record
-		found = true
+		recordIndex = index
+		currentRecord = record
 		break
 	}
 
-	if !found {
+	if recordIndex == -1 {
 		return errors.New("key record not found")
 	}
+
+	providerChanged := strings.TrimSpace(currentRecord.Provider) != provider
+	nameChanged := strings.TrimSpace(currentRecord.Name) != name
+	valueChanged := value != ""
+	if !providerChanged && !nameChanged && !valueChanged {
+		return nil
+	}
+
+	effectiveValue := value
+	if effectiveValue == "" {
+		effectiveValue, err = decryptStoredValue(currentRecord)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := ensureUniqueKeyRecord(records, id, provider, name, effectiveValue); err != nil {
+		return err
+	}
+
+	if valueChanged {
+		protectedValue, err := protectKeyValue(effectiveValue)
+		if err != nil {
+			return err
+		}
+		currentRecord.EncryptedValue = base64.StdEncoding.EncodeToString(protectedValue)
+	}
+
+	currentRecord.Provider = provider
+	currentRecord.Name = name
+	currentRecord.UpdatedAt = time.Now().Format(time.RFC3339)
+	records[recordIndex] = currentRecord
 
 	return writeStoredKeys(records)
 }
@@ -274,6 +300,24 @@ func validateStoredKeys(records []storedKeyRecord) error {
 			strings.TrimSpace(record.CreatedAt) == "" ||
 			strings.TrimSpace(record.UpdatedAt) == "" {
 			return fmt.Errorf("invalid encrypted key store record at index %d", index)
+		}
+	}
+
+	return nil
+}
+
+func ensureUniqueKeyRecord(records []storedKeyRecord, excludedID string, provider string, name string, value string) error {
+	for _, record := range records {
+		if record.ID == excludedID || strings.TrimSpace(record.Provider) != provider || strings.TrimSpace(record.Name) != name {
+			continue
+		}
+
+		storedValue, err := decryptStoredValue(record)
+		if err != nil {
+			return err
+		}
+		if storedValue == value {
+			return errors.New("a key with the same provider, name, and key content already exists")
 		}
 	}
 
