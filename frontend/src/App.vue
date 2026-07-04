@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { onMounted, reactive, ref } from 'vue'
-import { ListKeys, SaveKey } from '../wailsjs/go/main/App'
+import { DeleteKey, ListKeys, SaveKey } from '../wailsjs/go/main/App'
 import type { main } from '../wailsjs/go/models'
 
 const form = reactive({
@@ -13,6 +13,7 @@ const keys = ref<main.KeyRecord[]>([])
 const errorMessage = ref('')
 const isSaving = ref(false)
 const isLoading = ref(false)
+const deletingKeyId = ref('')
 
 /**
  * Reloads key records from the Wails backend so the table reflects the local
@@ -55,6 +56,24 @@ async function saveKey() {
     errorMessage.value = getErrorMessage(error, '保存 Key 失败')
   } finally {
     isSaving.value = false
+  }
+}
+
+/**
+ * Removes a saved key record after the user confirms the row-level delete
+ * prompt, then reloads records from the backend store.
+ */
+async function deleteKey(record: main.KeyRecord) {
+  errorMessage.value = ''
+  deletingKeyId.value = record.id
+
+  try {
+    await DeleteKey(record.id)
+    await refreshKeys()
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error, '删除 Key 失败')
+  } finally {
+    deletingKeyId.value = ''
   }
 }
 
@@ -138,6 +157,7 @@ onMounted(refreshKeys)
               <th>名称</th>
               <th>Key 内容</th>
               <th>创建时间</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -146,6 +166,22 @@ onMounted(refreshKeys)
               <td>{{ record.name }}</td>
               <td class="key-value">{{ record.value }}</td>
               <td>{{ formatDate(record.createdAt) }}</td>
+              <td class="table-actions">
+                <t-popconfirm
+                  content="确认删除这条 Key 记录？"
+                  theme="danger"
+                  @confirm="deleteKey(record)"
+                >
+                  <t-button
+                    theme="danger"
+                    variant="text"
+                    size="small"
+                    :loading="deletingKeyId === record.id"
+                  >
+                    删除
+                  </t-button>
+                </t-popconfirm>
+              </td>
             </tr>
           </tbody>
         </table>

@@ -65,17 +65,7 @@ func (a *App) SaveKey(provider string, name string, value string) error {
 		CreatedAt: now.Format(time.RFC3339),
 	})
 
-	path, err := keyStorePath()
-	if err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(records, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0666)
+	return writeKeys(records)
 }
 
 // ListKeys returns all locally saved API keys from the local key store.
@@ -102,6 +92,50 @@ func (a *App) ListKeys() ([]KeyRecord, error) {
 	}
 
 	return records, nil
+}
+
+// DeleteKey removes the saved API key matching the provided record ID.
+func (a *App) DeleteKey(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("key record ID is required")
+	}
+
+	records, err := a.ListKeys()
+	if err != nil {
+		return err
+	}
+
+	nextRecords := make([]KeyRecord, 0, len(records))
+	found := false
+	for _, record := range records {
+		if record.ID == id {
+			found = true
+			continue
+		}
+
+		nextRecords = append(nextRecords, record)
+	}
+
+	if !found {
+		return errors.New("key record not found")
+	}
+
+	return writeKeys(nextRecords)
+}
+
+func writeKeys(records []KeyRecord) error {
+	path, err := keyStorePath()
+	if err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0666)
 }
 
 func keyStorePath() (string, error) {

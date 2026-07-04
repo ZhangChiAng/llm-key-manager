@@ -169,6 +169,11 @@ tbody tr:last-child td {
   font-size: 13px;
 }
 
+.table-actions {
+  width: 88px;
+  white-space: nowrap;
+}
+
 .empty-state {
   padding: 48px 24px;
   text-align: center;
