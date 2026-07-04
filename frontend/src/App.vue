@@ -28,6 +28,13 @@ const copyingKeyId = ref('')
 const deletingKeyId = ref('')
 const originalEditProvider = ref('')
 const originalEditName = ref('')
+const expandedProviders = reactive(new Map<string, boolean>())
+
+type ProviderGroup = {
+  provider: string
+  latestUpdatedAt: number
+  records: main.KeyRecord[]
+}
 
 const isEditUnchanged = computed(
   () =>
@@ -35,6 +42,37 @@ const isEditUnchanged = computed(
     editForm.name.trim() === originalEditName.value.trim() &&
     editForm.value.trim() === '',
 )
+
+const groupedKeys = computed(() => {
+  const groups = new Map<string, ProviderGroup>()
+
+  for (const record of keys.value) {
+    const provider = record.provider.trim()
+    const updatedAt = getDateTime(record.updatedAt)
+    const group = groups.get(provider)
+
+    if (group) {
+      group.records.push(record)
+      group.latestUpdatedAt = Math.max(group.latestUpdatedAt, updatedAt)
+      continue
+    }
+
+    groups.set(provider, {
+      provider,
+      latestUpdatedAt: updatedAt,
+      records: [record],
+    })
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      records: [...group.records].sort((left, right) => {
+        return getDateTime(right.updatedAt) - getDateTime(left.updatedAt)
+      }),
+    }))
+    .sort((left, right) => right.latestUpdatedAt - left.latestUpdatedAt)
+})
 
 /**
  * Reloads key records from the Wails backend so the table reflects the local
@@ -191,6 +229,12 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function getDateTime(value: string) {
+  const time = new Date(value).getTime()
+
+  return Number.isNaN(time) ? 0 : time
+}
+
 function formatDate(value: string) {
   const date = new Date(value)
 
@@ -199,6 +243,14 @@ function formatDate(value: string) {
   }
 
   return date.toLocaleString()
+}
+
+function isProviderExpanded(provider: string) {
+  return expandedProviders.get(provider) === true
+}
+
+function toggleProvider(provider: string) {
+  expandedProviders.set(provider, !isProviderExpanded(provider))
 }
 
 onMounted(refreshKeys)
@@ -250,61 +302,79 @@ onMounted(refreshKeys)
 
       <div v-if="keys.length === 0" class="empty-state">暂无记录</div>
 
-      <div v-else class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>提供商</th>
-              <th>名称</th>
-              <th>Key 内容</th>
-              <th>创建时间</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="record in keys" :key="record.id">
-              <td>{{ record.provider }}</td>
-              <td>{{ record.name }}</td>
-              <td class="key-value">{{ record.maskedValue }}</td>
-              <td>{{ formatDate(record.createdAt) }}</td>
-              <td>{{ formatDate(record.updatedAt) }}</td>
-              <td class="table-actions">
-                <t-button
-                  theme="default"
-                  variant="text"
-                  size="small"
-                  @click="openEditDialog(record)"
-                >
-                  编辑
-                </t-button>
-                <t-button
-                  theme="primary"
-                  variant="text"
-                  size="small"
-                  :loading="copyingKeyId === record.id"
-                  @click="copyKey(record)"
-                >
-                  复制
-                </t-button>
-                <t-popconfirm
-                  content="确认删除这条 Key 记录？"
-                  theme="danger"
-                  @confirm="deleteKey(record)"
-                >
-                  <t-button
-                    theme="danger"
-                    variant="text"
-                    size="small"
-                    :loading="deletingKeyId === record.id"
-                  >
-                    删除
-                  </t-button>
-                </t-popconfirm>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-else class="provider-groups">
+        <section v-for="group in groupedKeys" :key="group.provider" class="provider-group">
+          <button
+            class="provider-header"
+            type="button"
+            :aria-expanded="isProviderExpanded(group.provider)"
+            @click="toggleProvider(group.provider)"
+          >
+            <span class="provider-toggle" aria-hidden="true">
+              {{ isProviderExpanded(group.provider) ? '▾' : '▸' }}
+            </span>
+            <span class="provider-name">{{ group.provider }}</span>
+            <span class="provider-count">{{ group.records.length }} 条</span>
+            <span class="provider-state">
+              {{ isProviderExpanded(group.provider) ? '收起' : '展开' }}
+            </span>
+          </button>
+
+          <div v-if="isProviderExpanded(group.provider)" class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>Key 内容</th>
+                  <th>创建时间</th>
+                  <th>更新时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="record in group.records" :key="record.id">
+                  <td>{{ record.name }}</td>
+                  <td class="key-value">{{ record.maskedValue }}</td>
+                  <td>{{ formatDate(record.createdAt) }}</td>
+                  <td>{{ formatDate(record.updatedAt) }}</td>
+                  <td class="table-actions">
+                    <t-button
+                      theme="default"
+                      variant="text"
+                      size="small"
+                      @click="openEditDialog(record)"
+                    >
+                      编辑
+                    </t-button>
+                    <t-button
+                      theme="primary"
+                      variant="text"
+                      size="small"
+                      :loading="copyingKeyId === record.id"
+                      @click="copyKey(record)"
+                    >
+                      复制
+                    </t-button>
+                    <t-popconfirm
+                      content="确认删除这条 Key 记录？"
+                      theme="danger"
+                      @confirm="deleteKey(record)"
+                    >
+                      <t-button
+                        theme="danger"
+                        variant="text"
+                        size="small"
+                        :loading="deletingKeyId === record.id"
+                      >
+                        删除
+                      </t-button>
+                    </t-popconfirm>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </section>
 
