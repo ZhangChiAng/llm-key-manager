@@ -2,12 +2,44 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// App struct
+// App manages backend state and exposes methods to the Wails frontend.
 type App struct {
 	ctx context.Context
+}
+
+// KeyRecord describes API key metadata returned to the frontend.
+type KeyRecord struct {
+	// ID is a generated unique identifier based on the creation timestamp.
+	ID string `json:"id"`
+	// Provider names the API provider this key belongs to.
+	Provider string `json:"provider"`
+	// Name is the user-facing label for the key.
+	Name string `json:"name"`
+	// MaskedValue contains the redacted API key content for display.
+	MaskedValue string `json:"maskedValue"`
+	// CreatedAt records when the key was saved in RFC3339 format.
+	CreatedAt string `json:"createdAt"`
+}
+
+type storedKeyRecord struct {
+	ID             string `json:"id"`
+	Provider       string `json:"provider"`
+	Name           string `json:"name"`
+	EncryptedValue string `json:"encryptedValue"`
+	CreatedAt      string `json:"createdAt"`
 }
 
 // NewApp creates a new App application struct
@@ -21,7 +53,210 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// Greet returns a greeting for the given name
-func (a *App) Greet(name string) string {
-	return fmt.Sprintf("Hello %s, It's show time!", name)
+// SaveKey validates and stores an encrypted API key in the local key store.
+func (a *App) SaveKey(provider string, name string, value string) error {
+	provider = strings.TrimSpace(provider)
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
+
+	if provider == "" || name == "" || value == "" {
+		return errors.New("provider, name, and key content are required")
+	}
+
+	records, err := readStoredKeys()
+	if err != nil {
+		return err
+	}
+
+	protectedValue, err := protectKeyValue(value)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	records = append(records, storedKeyRecord{
+		ID:             strconv.FormatInt(now.UnixNano(), 10),
+		Provider:       provider,
+		Name:           name,
+		EncryptedValue: base64.StdEncoding.EncodeToString(protectedValue),
+		CreatedAt:      now.Format(time.RFC3339),
+	})
+
+	return writeStoredKeys(records)
+}
+
+// ListKeys returns all locally saved API keys with masked values only.
+func (a *App) ListKeys() ([]KeyRecord, error) {
+	storedRecords, err := readStoredKeys()
+	if err != nil {
+		return nil, err
+	}
+
+	records := make([]KeyRecord, 0, len(storedRecords))
+	for _, record := range storedRecords {
+		value, err := decryptStoredValue(record)
+		if err != nil {
+			return nil, err
+		}
+
+		records = append(records, KeyRecord{
+			ID:          record.ID,
+			Provider:    record.Provider,
+			Name:        record.Name,
+			MaskedValue: maskKeyValue(value),
+			CreatedAt:   record.CreatedAt,
+		})
+	}
+
+	return records, nil
+}
+
+// CopyKey decrypts the saved API key and writes the plaintext to the clipboard.
+func (a *App) CopyKey(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("key record ID is required")
+	}
+	if a.ctx == nil {
+		return errors.New("application context is not ready")
+	}
+
+	records, err := readStoredKeys()
+	if err != nil {
+		return err
+	}
+
+	for _, record := range records {
+		if record.ID != id {
+			continue
+		}
+
+		value, err := decryptStoredValue(record)
+		if err != nil {
+			return err
+		}
+
+		return runtime.ClipboardSetText(a.ctx, value)
+	}
+
+	return errors.New("key record not found")
+}
+
+// DeleteKey removes the saved API key matching the provided record ID.
+func (a *App) DeleteKey(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("key record ID is required")
+	}
+
+	records, err := readStoredKeys()
+	if err != nil {
+		return err
+	}
+
+	nextRecords := make([]storedKeyRecord, 0, len(records))
+	found := false
+	for _, record := range records {
+		if record.ID == id {
+			found = true
+			continue
+		}
+
+		nextRecords = append(nextRecords, record)
+	}
+
+	if !found {
+		return errors.New("key record not found")
+	}
+
+	return writeStoredKeys(nextRecords)
+}
+
+func readStoredKeys() ([]storedKeyRecord, error) {
+	path, err := keyStorePath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return []storedKeyRecord{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var records []storedKeyRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, err
+	}
+	if records == nil {
+		return []storedKeyRecord{}, nil
+	}
+	if err := validateStoredKeys(records); err != nil {
+		return nil, err
+	}
+
+	return records, nil
+}
+
+func writeStoredKeys(records []storedKeyRecord) error {
+	path, err := keyStorePath()
+	if err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0666)
+}
+
+func validateStoredKeys(records []storedKeyRecord) error {
+	for index, record := range records {
+		if strings.TrimSpace(record.ID) == "" ||
+			strings.TrimSpace(record.Provider) == "" ||
+			strings.TrimSpace(record.Name) == "" ||
+			strings.TrimSpace(record.EncryptedValue) == "" ||
+			strings.TrimSpace(record.CreatedAt) == "" {
+			return fmt.Errorf("invalid encrypted key store record at index %d", index)
+		}
+	}
+
+	return nil
+}
+
+func decryptStoredValue(record storedKeyRecord) (string, error) {
+	protectedValue, err := base64.StdEncoding.DecodeString(record.EncryptedValue)
+	if err != nil {
+		return "", err
+	}
+
+	return unprotectKeyValue(protectedValue)
+}
+
+func maskKeyValue(value string) string {
+	const (
+		prefixLength  = 10
+		suffixLength  = 4
+		fullMask      = "*****************"
+		separatorMask = "***"
+	)
+
+	if len(value) <= prefixLength+suffixLength {
+		return fullMask
+	}
+
+	return value[:prefixLength] + separatorMask + value[len(value)-suffixLength:]
+}
+
+func keyStorePath() (string, error) {
+	executablePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(filepath.Dir(executablePath), "keys.json"), nil
 }
