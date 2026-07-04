@@ -270,7 +270,12 @@ onMounted(refreshKeys)
               <td>{{ formatDate(record.createdAt) }}</td>
               <td>{{ formatDate(record.updatedAt) }}</td>
               <td class="table-actions">
-                <t-button theme="default" variant="text" size="small" @click="openEditDialog(record)">
+                <t-button
+                  theme="default"
+                  variant="text"
+                  size="small"
+                  @click="openEditDialog(record)"
+                >
                   编辑
                 </t-button>
                 <t-button
