@@ -288,7 +288,42 @@ func writeStoredKeys(records []storedKeyRecord) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0666)
+	return writeFileAtomically(path, data)
+}
+
+func writeFileAtomically(path string, data []byte) error {
+	directory := filepath.Dir(path)
+	tempFile, err := os.CreateTemp(directory, ".keys-*.tmp")
+	if err != nil {
+		return err
+	}
+
+	tempPath := tempFile.Name()
+	removeTempFile := true
+	defer func() {
+		if removeTempFile {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if _, err := tempFile.Write(data); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	removeTempFile = false
+
+	return nil
 }
 
 func validateStoredKeys(records []storedKeyRecord) error {
