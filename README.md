@@ -2,7 +2,7 @@
 
 基于 Wails + Vue 3 + TypeScript 的桌面应用。
 
-当前项目在远程 Linux 服务器上开发。日常查看界面效果使用 Vite + SSH 端口转发；Windows 发布包通过 Linux 交叉编译生成。
+当前项目在远程 Linux 服务器上开发。日常开发以静态检查和 Windows 构建检查为主；真实运行效果在 Windows 桌面环境中验证。
 
 ## 开发循环
 
@@ -12,26 +12,16 @@
 cd .
 ```
 
-在远程 Linux 服务器上启动前端开发服务：
+远程 Linux 日常开发以静态检查和构建检查为主：
 
 ```bash
 cd frontend
-npm run dev -- --host 127.0.0.1
+npm run lint
+npm run format
+npm run build
 ```
 
-在本地电脑上打开 SSH 端口转发：
-
-```bash
-ssh -L 5173:127.0.0.1:5173 <用户名>@<服务器地址>
-```
-
-然后在本地浏览器访问：
-
-```text
-http://localhost:5173
-```
-
-这足够用于查看 Vue 和 TDesign 的界面效果。修改 `frontend/src` 下的前端代码后，Vite 会自动热更新。
+需要验证真实应用行为时，构建 Windows 产物并在 Windows 桌面环境中运行。前端调用通过 Wails 注入的 Go 后端绑定完成。
 
 ## 后端变更
 
@@ -39,7 +29,7 @@ http://localhost:5173
 
 ```bash
 cd .
-GOTOOLCHAIN=local wails build -clean
+GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64
 ```
 
 如果新增、删除、重命名了暴露给前端调用的 Go 方法，或者修改了这些方法的参数和返回值，需要重新生成 Wails 前端绑定：
@@ -60,6 +50,8 @@ frontend/wailsjs
 
 ```bash
 cd frontend
+npm run lint
+npm run format
 npm run build
 ```
 
@@ -67,16 +59,10 @@ Linux 上的完整 Wails 构建检查：
 
 ```bash
 cd .
-GOTOOLCHAIN=local wails build -clean
+GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64
 ```
 
-当前服务器是无桌面远程环境，不建议把下面命令作为日常开发流程：
-
-```bash
-wails dev
-```
-
-因为它会尝试启动 Linux 桌面窗口。
+远程无桌面 Linux 使用前面的构建检查命令；桌面运行效果在 Windows 环境中验证。
 
 ## Windows 构建循环
 
