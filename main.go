@@ -1,3 +1,4 @@
+// Package main configures the Windows Wails desktop application.
 package main
 
 import (

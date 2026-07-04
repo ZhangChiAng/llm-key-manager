@@ -9,6 +9,9 @@ linters:
     - govet
     - staticcheck
     - revive
+  exclusions:
+    paths:
+      - frontend/node_modules
   settings:
     revive:
       rules:
