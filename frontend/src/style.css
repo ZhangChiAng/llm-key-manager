@@ -31,6 +31,10 @@ body,
   margin: 0;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
 }
@@ -134,8 +138,69 @@ h2 {
   overflow: hidden;
 }
 
+.provider-groups {
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-group {
+  border-bottom: 1px solid #edf1f6;
+}
+
+.provider-group:last-child {
+  border-bottom: 0;
+}
+
+.provider-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+  padding: 16px 24px;
+  border: 0;
+  color: #1f2937;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.provider-header:hover {
+  background: #f8fafc;
+}
+
+.provider-toggle {
+  width: 18px;
+  flex: 0 0 18px;
+  color: #667085;
+  line-height: 1;
+}
+
+.provider-name {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.provider-count {
+  border: 1px solid #d9e1ec;
+  border-radius: 999px;
+  padding: 2px 10px;
+  color: #475467;
+  background: #f8fafc;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.provider-state {
+  color: #667085;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .table-wrap {
   overflow-x: auto;
+  border-top: 1px solid #edf1f6;
 }
 
 table {
