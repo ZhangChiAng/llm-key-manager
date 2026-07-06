@@ -18,7 +18,7 @@ LLM Key Manager 是一个面向 Windows 的本地 API Key 管理桌面应用，�
 
 当前版本采用本地单机安全模型：
 
-- 密钥文件位于应用可执行文件同目录的 `keys.json`。
+- 密钥文件位于当前 Windows 用户的本机应用数据目录：`%LOCALAPPDATA%\LLM Key Manager\keys.json`。
 - `keys.json` 中的 Key 内容使用 Windows DPAPI 加密后再 Base64 编码保存。
 - 加密和解密能力依赖当前 Windows 用户环境，项目不提供云同步、远程备份或跨平台解密。
 - 前端 `ListKeys` 只接收脱敏后的 Key；复制明文 Key 时通过 Wails 后端直接写入剪贴板。

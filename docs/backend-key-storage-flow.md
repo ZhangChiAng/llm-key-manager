@@ -37,8 +37,8 @@
   │
   ├─ TrimSpace(三个参数)
   ├─ readStoredKeys()
-  │      ├─ keyStorePath() ───────────► os.Executable() ──► filepath.Join
-  │      ├─ os.ReadFile(path) ─────────────────────────────────► keys.json
+  │      ├─ keyStorePath() ───────────► LOCALAPPDATA ──► filepath.Join
+  │      ├─ os.ReadFile(path) ─────────────────────────────────► %LOCALAPPDATA%\LLM Key Manager\keys.json
   │      ├─ json.Unmarshal(data, &records)
   │      └─ validateStoredKeys(records)
   │
@@ -53,8 +53,9 @@
   │
   └─ writeStoredKeys(records)
          ├─ keyStorePath()
+         ├─ os.MkdirAll(filepath.Dir(path), 0755)
          ├─ json.MarshalIndent(records)
-         └─ os.WriteFile(path, data, 0666) ─────────────────────► keys.json
+         └─ writeFileAtomically(path, data) ────────────────────► %LOCALAPPDATA%\LLM Key Manager\keys.json
 
 
   ListKeys()
@@ -160,10 +161,10 @@
 
   函数                       职责
   ──────────────────────     ─────────────────────────────────────────────────────
-  readStoredKeys()           打开 keys.json → JSON反序列化 → 校验 → 返回 []storedKeyRecord
-  writeStoredKeys(records)   []storedKeyRecord → JSON序列化 → 写入 keys.json
+  readStoredKeys()           打开 %LOCALAPPDATA%\LLM Key Manager\keys.json → JSON反序列化 → 校验 → 返回 []storedKeyRecord
+  writeStoredKeys(records)   []storedKeyRecord → JSON序列化 → 写入 %LOCALAPPDATA%\LLM Key Manager\keys.json
   validateStoredKeys(...)    检查每条记录的 ID/Provider/Name/EncryptedValue/CreatedAt 非空
-  keyStorePath()             返回 <exe所在目录>/keys.json
+  keyStorePath()             返回 %LOCALAPPDATA%\LLM Key Manager\keys.json
   decryptStoredValue(...)    base64解码 EncryptedValue → DPAPI解密 → 明文
   maskKeyValue(...)          明文长度>14时前缀10字符+***+后缀4字符，否则全***
   protectKeyValue(...)       DPAPI加密明文 → 返回字节流 (平台相关)

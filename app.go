@@ -17,6 +17,8 @@ import (
 const (
 	errKeyDuplicate    = "ERR_KEY_DUPLICATE"
 	errKeyStoreInvalid = "ERR_KEY_STORE_INVALID"
+	keyStoreDirectory  = "LLM Key Manager"
+	keyStoreFileName   = "keys.json"
 )
 
 // App manages backend state and exposes methods to the Wails frontend.
@@ -281,6 +283,9 @@ func writeStoredKeys(records []storedKeyRecord) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 
 	data, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
@@ -383,10 +388,10 @@ func maskKeyValue(value string) string {
 }
 
 func keyStorePath() (string, error) {
-	executablePath, err := os.Executable()
-	if err != nil {
-		return "", err
+	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	if localAppData == "" {
+		return "", errors.New("LOCALAPPDATA is not set")
 	}
 
-	return filepath.Join(filepath.Dir(executablePath), "keys.json"), nil
+	return filepath.Join(localAppData, keyStoreDirectory, keyStoreFileName), nil
 }
