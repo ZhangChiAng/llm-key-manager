@@ -1,36 +1,32 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Project Structure
 
-This is a Windows-only Wails desktop app with a Go backend and Vue 3/TypeScript frontend. Do not add support paths for macOS, Linux desktop, or other platforms. `build/darwin/` is leftover Wails template material; do not modify or remove it unless explicitly requested.
+This is a Windows-only Wails desktop app with a Go backend and Vue 3/TypeScript frontend. Do not add macOS, Linux desktop, or other platform support paths. `build/darwin/` is leftover Wails template material; do not modify or remove it unless explicitly requested.
 
-- `main.go` and `app.go` configure the Wails window, embedded assets, backend bindings, and exported `App` methods callable from the frontend.
-- `frontend/src/` contains Vue code, components, styles, and assets.
-- `frontend/wailsjs/` contains generated Wails bindings; regenerate these after changing exported Go methods.
+- `main.go` and `app.go` configure the Wails window, embedded assets, backend bindings, and exported `App` methods.
+- `frontend/src/` contains Vue components, styles, and assets.
+- `frontend/wailsjs/` contains generated Wails bindings; regenerate it after exported Go method changes.
 - `build/` contains Windows packaging assets and generated output in `build/bin/`.
 
-## Build, Test, and Development Commands
+## Required Verification
 
-- `cd frontend && npm install`: install frontend dependencies when needed.
-- `cd frontend && npm run build`: type-check and build the production frontend.
-- `cd frontend && npm run lint`: run ESLint for Vue and TypeScript code.
-- `cd frontend && npm run format`: check formatting for Vue, TypeScript, CSS, Markdown, and root Markdown docs.
-- `GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...`: run Go lint checks from `.golangci.yml`.
-- `GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64`: run a full Windows Wails build check.
-- `GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails generate module`: regenerate `frontend/wailsjs` after changing exported backend method signatures.
+After every code edit, run formatting first, then run both frontend and backend checks before reporting completion. Do not skip one side because a change looks isolated; Go, Wails bindings, and Vue build behavior are coupled.
+
+- Frontend: `cd frontend && npm run lint:fix && npm run format:fix && npm run lint && npm run format && npm run build`.
+- Backend: `gofmt -w <edited-go-files>` and `GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...`.
+- Full integration when feasible: `GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64`.
+- Wails bindings: when exported `App` methods are added, removed, renamed, or have signature changes, run `GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails generate module` before frontend checks.
+- If a required command cannot run, state the exact command, failure reason, and completed partial verification.
 
 Avoid `wails dev` on headless remote Linux hosts because it opens a desktop window.
 
-## Coding Style & Naming Conventions
+## Coding Style
 
-Use `gofmt` for Go files. Keep exported backend methods on `App` in PascalCase so Wails can bind them, and keep unexported helpers camelCase. Add Go doc comments for exported types, functions, methods, constants, and variables. Comments should explain behavior, constraints, side effects, or non-obvious decisions.
+Use `gofmt` for Go. Keep exported backend methods on `App` in PascalCase and unexported helpers camelCase. Add Go doc comments for exported types, functions, methods, constants, and variables; explain behavior, constraints, side effects, or non-obvious decisions.
 
-Use the repository `.golangci.yml` configuration for Go static analysis, including `govet`, `staticcheck`, and `revive` comment rules.
+Frontend code uses Vue single-file components with TypeScript. Name components in PascalCase, keep shared assets under `frontend/src/assets/`, and follow existing Vue, Vite, TDesign, ESLint, and Prettier patterns. Use JSDoc/TSDoc for exported APIs, shared helpers, persistence or security behavior, and other non-obvious frontend logic.
 
-Frontend code uses Vue single-file components with TypeScript. Name components in PascalCase, for example `KeyList.vue`, and keep shared assets under `frontend/src/assets/`. Prefer existing Vue, Vite, and TDesign patterns. Use JSDoc/TSDoc for exported APIs, shared helpers, persistence or security behavior, and other non-obvious frontend logic.
+## Security
 
-Use the frontend ESLint flat config in `frontend/eslint.config.js` and formatting tools from `frontend/package.json`. Do not require docstrings for every local helper.
-
-## Security & Configuration Tips
-
-Do not commit real API keys, local secrets, or generated credentials. Keep machine-specific configuration out of source control, and review generated Wails bindings before committing.
+Do not commit real API keys, local secrets, generated credentials, or machine-specific configuration. Review generated Wails bindings before committing.
