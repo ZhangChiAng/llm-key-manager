@@ -10,7 +10,6 @@ const form = reactive({
 })
 
 const editForm = reactive({
-  id: '',
   provider: '',
   name: '',
   value: '',
@@ -26,6 +25,7 @@ const isEditDialogVisible = ref(false)
 const isUpdating = ref(false)
 const copyingKeyId = ref('')
 const deletingKeyId = ref('')
+const selectedEditRecord = ref<main.KeyRecord | null>(null)
 const originalEditProvider = ref('')
 const originalEditName = ref('')
 const expandedProviders = reactive(new Map<string, boolean>())
@@ -128,7 +128,7 @@ function openEditDialog(record: main.KeyRecord) {
   errorMessage.value = ''
   successMessage.value = ''
   editErrorMessage.value = ''
-  editForm.id = record.id
+  selectedEditRecord.value = record
   editForm.provider = record.provider
   editForm.name = record.name
   editForm.value = ''
@@ -141,7 +141,7 @@ function openEditDialog(record: main.KeyRecord) {
  * Clears edit state after the dialog has closed.
  */
 function resetEditForm() {
-  editForm.id = ''
+  selectedEditRecord.value = null
   editForm.provider = ''
   editForm.name = ''
   editForm.value = ''
@@ -157,15 +157,21 @@ function resetEditForm() {
 async function updateKey() {
   editErrorMessage.value = ''
 
-  if (!editForm.id || !editForm.provider.trim() || !editForm.name.trim()) {
+  if (!editForm.provider.trim() || !editForm.name.trim()) {
     editErrorMessage.value = '请填写提供商和 Key 名称'
+    return
+  }
+
+  const record = selectedEditRecord.value
+  if (!record) {
+    editErrorMessage.value = '更新 Key 失败'
     return
   }
 
   isUpdating.value = true
 
   try {
-    await UpdateKey(editForm.id, editForm.provider, editForm.name, editForm.value)
+    await UpdateKey(record.id, editForm.provider, editForm.name, editForm.value)
     isEditDialogVisible.value = false
     await refreshKeys()
     successMessage.value = 'Key 已更新'
@@ -215,15 +221,17 @@ async function deleteKey(record: main.KeyRecord) {
 }
 
 /**
- * Normalizes Wails bridge errors and frontend exceptions into text that can be
- * displayed in the form error area.
+ * Translates stable backend error codes and hides internal error details from
+ * the UI behind operation-specific Chinese fallbacks.
  */
 function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) {
-    return error.message
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+
+  if (message.includes('ERR_KEY_DUPLICATE')) {
+    return '已存在相同提供商、名称和内容的 Key'
   }
-  if (typeof error === 'string' && error) {
-    return error
+  if (message.includes('ERR_KEY_STORE_INVALID')) {
+    return '本地 Key 存储文件格式异常'
   }
 
   return fallback

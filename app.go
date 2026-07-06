@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +12,11 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+const (
+	errKeyDuplicate    = "ERR_KEY_DUPLICATE"
+	errKeyStoreInvalid = "ERR_KEY_STORE_INVALID"
 )
 
 // App manages backend state and exposes methods to the Wails frontend.
@@ -128,8 +132,8 @@ func (a *App) UpdateKey(id string, provider string, name string, value string) e
 	name = strings.TrimSpace(name)
 	value = strings.TrimSpace(value)
 
-	if id == "" || provider == "" || name == "" {
-		return errors.New("key record ID, provider, and name are required")
+	if provider == "" || name == "" {
+		return errors.New("provider and name are required")
 	}
 
 	records, err := readStoredKeys()
@@ -191,12 +195,6 @@ func (a *App) UpdateKey(id string, provider string, name string, value string) e
 // CopyKey decrypts the saved API key and writes the plaintext to the clipboard.
 func (a *App) CopyKey(id string) error {
 	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.New("key record ID is required")
-	}
-	if a.ctx == nil {
-		return errors.New("application context is not ready")
-	}
 
 	records, err := readStoredKeys()
 	if err != nil {
@@ -213,6 +211,10 @@ func (a *App) CopyKey(id string) error {
 			return err
 		}
 
+		if a.ctx == nil {
+			return errors.New("application context is not ready")
+		}
+
 		return runtime.ClipboardSetText(a.ctx, value)
 	}
 
@@ -222,9 +224,6 @@ func (a *App) CopyKey(id string) error {
 // DeleteKey removes the saved API key matching the provided record ID.
 func (a *App) DeleteKey(id string) error {
 	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.New("key record ID is required")
-	}
 
 	records, err := readStoredKeys()
 	if err != nil {
@@ -265,7 +264,7 @@ func readStoredKeys() ([]storedKeyRecord, error) {
 
 	var records []storedKeyRecord
 	if err := json.Unmarshal(data, &records); err != nil {
-		return nil, err
+		return nil, errors.New(errKeyStoreInvalid)
 	}
 	if records == nil {
 		return []storedKeyRecord{}, nil
@@ -327,14 +326,14 @@ func writeFileAtomically(path string, data []byte) error {
 }
 
 func validateStoredKeys(records []storedKeyRecord) error {
-	for index, record := range records {
+	for _, record := range records {
 		if strings.TrimSpace(record.ID) == "" ||
 			strings.TrimSpace(record.Provider) == "" ||
 			strings.TrimSpace(record.Name) == "" ||
 			strings.TrimSpace(record.EncryptedValue) == "" ||
 			strings.TrimSpace(record.CreatedAt) == "" ||
 			strings.TrimSpace(record.UpdatedAt) == "" {
-			return fmt.Errorf("invalid encrypted key store record at index %d", index)
+			return errors.New(errKeyStoreInvalid)
 		}
 	}
 
@@ -352,7 +351,7 @@ func ensureUniqueKeyRecord(records []storedKeyRecord, excludedID string, provide
 			return err
 		}
 		if storedValue == value {
-			return errors.New("a key with the same provider, name, and key content already exists")
+			return errors.New(errKeyDuplicate)
 		}
 	}
 
