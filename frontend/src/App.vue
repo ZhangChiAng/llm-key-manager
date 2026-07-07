@@ -330,6 +330,13 @@ onMounted(refreshKeys)
 
           <div v-if="isProviderExpanded(group.provider)" class="table-wrap">
             <table>
+              <colgroup>
+                <col style="width: 18%" />
+                <col style="width: 30%" />
+                <col style="width: 20%" />
+                <col style="width: 20%" />
+                <col style="width: 180px" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>名称</th>
