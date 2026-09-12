@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, reactive, ref } from 'vue'
 import type { main } from '../../wailsjs/go/models'
+import ProviderInput from './ProviderInput.vue'
 
 /** The dialog receives metadata only; a blank key value preserves its ciphertext. */
 const props = defineProps<{
@@ -61,7 +62,7 @@ async function save() {
     <form class="edit-form" @submit.prevent="save">
       <label class="field">
         <span>提供商</span>
-        <t-input v-model="form.provider" placeholder="DeepSeek / OfoxAI" clearable />
+        <ProviderInput v-model="form.provider" />
       </label>
 
       <label class="field">

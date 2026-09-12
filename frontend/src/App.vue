@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { main } from '../wailsjs/go/models'
 import KeyEditDialog from './components/KeyEditDialog.vue'
+import ProviderInput from './components/ProviderInput.vue'
 import { useKeyManager } from './composables/useKeyManager'
 
 const {
@@ -137,7 +138,7 @@ onMounted(refreshKeys)
       <form class="key-form" @submit.prevent="submitKey">
         <label class="field">
           <span>提供商</span>
-          <t-input v-model="form.provider" placeholder="DeepSeek / OfoxAI" clearable />
+          <ProviderInput v-model="form.provider" />
         </label>
 
         <label class="field">
