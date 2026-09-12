@@ -1,7 +1,24 @@
 <script lang="ts" setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { CopyKey, DeleteKey, ListKeys, SaveKey, UpdateKey } from '../wailsjs/go/main/App'
 import type { main } from '../wailsjs/go/models'
+import KeyEditDialog from './components/KeyEditDialog.vue'
+import { useKeyManager } from './composables/useKeyManager'
+
+const {
+  keys,
+  errorMessage,
+  successMessage,
+  isSaving,
+  isLoading,
+  copyingKeyId,
+  deletingKeyId,
+  clearMessages,
+  refreshKeys,
+  saveKey,
+  updateKey,
+  copyKey,
+  deleteKey,
+} = useKeyManager()
 
 const form = reactive({
   provider: '',
@@ -9,25 +26,7 @@ const form = reactive({
   value: '',
 })
 
-const editForm = reactive({
-  provider: '',
-  name: '',
-  value: '',
-})
-
-const keys = ref<main.KeyRecord[]>([])
-const errorMessage = ref('')
-const successMessage = ref('')
-const editErrorMessage = ref('')
-const isSaving = ref(false)
-const isLoading = ref(false)
-const isEditDialogVisible = ref(false)
-const isUpdating = ref(false)
-const copyingKeyId = ref('')
-const deletingKeyId = ref('')
 const selectedEditRecord = ref<main.KeyRecord | null>(null)
-const originalEditProvider = ref('')
-const originalEditName = ref('')
 const expandedProviders = reactive(new Map<string, boolean>())
 
 type ProviderGroup = {
@@ -35,13 +34,6 @@ type ProviderGroup = {
   latestUpdatedAt: number
   records: main.KeyRecord[]
 }
-
-const isEditUnchanged = computed(
-  () =>
-    editForm.provider.trim() === originalEditProvider.value.trim() &&
-    editForm.name.trim() === originalEditName.value.trim() &&
-    editForm.value.trim() === '',
-)
 
 const groupedKeys = computed(() => {
   const groups = new Map<string, ProviderGroup>()
@@ -75,48 +67,21 @@ const groupedKeys = computed(() => {
 })
 
 /**
- * Reloads key records from the Wails backend so the table reflects the local
- * encrypted key store on disk.
+ * Validates required input and clears the draft after the store write succeeds,
+ * including when reloading the saved list fails.
  */
-async function refreshKeys() {
-  isLoading.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
-
-  try {
-    keys.value = await ListKeys()
-  } catch (error) {
-    errorMessage.value = getErrorMessage(error, '读取 Key 列表失败')
-  } finally {
-    isLoading.value = false
-  }
-}
-
-/**
- * Persists the current form values through the Wails backend and clears the
- * form only after the local key store write succeeds.
- */
-async function saveKey() {
-  errorMessage.value = ''
-  successMessage.value = ''
+async function submitKey() {
+  clearMessages()
 
   if (!form.provider.trim() || !form.name.trim() || !form.value.trim()) {
     errorMessage.value = '请填写提供商、Key 名称和 Key 内容'
     return
   }
 
-  isSaving.value = true
-
-  try {
-    await SaveKey(form.provider, form.name, form.value)
+  if (await saveKey(form.provider, form.name, form.value)) {
     form.provider = ''
     form.name = ''
     form.value = ''
-    await refreshKeys()
-  } catch (error) {
-    errorMessage.value = getErrorMessage(error, '保存 Key 失败')
-  } finally {
-    isSaving.value = false
   }
 }
 
@@ -125,116 +90,8 @@ async function saveKey() {
  * plaintext key material is not requested from the backend.
  */
 function openEditDialog(record: main.KeyRecord) {
-  errorMessage.value = ''
-  successMessage.value = ''
-  editErrorMessage.value = ''
+  clearMessages()
   selectedEditRecord.value = record
-  editForm.provider = record.provider
-  editForm.name = record.name
-  editForm.value = ''
-  originalEditProvider.value = record.provider
-  originalEditName.value = record.name
-  isEditDialogVisible.value = true
-}
-
-/**
- * Clears edit state after the dialog has closed.
- */
-function resetEditForm() {
-  selectedEditRecord.value = null
-  editForm.provider = ''
-  editForm.name = ''
-  editForm.value = ''
-  originalEditProvider.value = ''
-  originalEditName.value = ''
-  editErrorMessage.value = ''
-}
-
-/**
- * Updates metadata and replaces the encrypted key value only when the user
- * entered new key content.
- */
-async function updateKey() {
-  editErrorMessage.value = ''
-
-  if (!editForm.provider.trim() || !editForm.name.trim()) {
-    editErrorMessage.value = '请填写提供商和 Key 名称'
-    return
-  }
-
-  const record = selectedEditRecord.value
-  if (!record) {
-    editErrorMessage.value = '更新 Key 失败'
-    return
-  }
-
-  isUpdating.value = true
-
-  try {
-    await UpdateKey(record.id, editForm.provider, editForm.name, editForm.value)
-    isEditDialogVisible.value = false
-    await refreshKeys()
-    successMessage.value = 'Key 已更新'
-  } catch (error) {
-    editErrorMessage.value = getErrorMessage(error, '更新 Key 失败')
-  } finally {
-    isUpdating.value = false
-  }
-}
-
-/**
- * Requests a backend clipboard copy so plaintext key material is never returned
- * to the frontend.
- */
-async function copyKey(record: main.KeyRecord) {
-  errorMessage.value = ''
-  successMessage.value = ''
-  copyingKeyId.value = record.id
-
-  try {
-    await CopyKey(record.id)
-    successMessage.value = 'Key 已复制到剪贴板'
-  } catch (error) {
-    errorMessage.value = getErrorMessage(error, '复制 Key 失败')
-  } finally {
-    copyingKeyId.value = ''
-  }
-}
-
-/**
- * Removes a saved key record after the user confirms the row-level delete
- * prompt, then reloads records from the backend store.
- */
-async function deleteKey(record: main.KeyRecord) {
-  errorMessage.value = ''
-  successMessage.value = ''
-  deletingKeyId.value = record.id
-
-  try {
-    await DeleteKey(record.id)
-    await refreshKeys()
-  } catch (error) {
-    errorMessage.value = getErrorMessage(error, '删除 Key 失败')
-  } finally {
-    deletingKeyId.value = ''
-  }
-}
-
-/**
- * Translates stable backend error codes and hides internal error details from
- * the UI behind operation-specific Chinese fallbacks.
- */
-function getErrorMessage(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
-
-  if (message.includes('ERR_KEY_DUPLICATE')) {
-    return '已存在相同提供商、名称和内容的 Key'
-  }
-  if (message.includes('ERR_KEY_STORE_INVALID')) {
-    return '本地 Key 存储文件格式异常'
-  }
-
-  return fallback
 }
 
 function getDateTime(value: string) {
@@ -277,7 +134,7 @@ onMounted(refreshKeys)
         </t-button>
       </div>
 
-      <form class="key-form" @submit.prevent="saveKey">
+      <form class="key-form" @submit.prevent="submitKey">
         <label class="field">
           <span>提供商</span>
           <t-input v-model="form.provider" placeholder="DeepSeek / OfoxAI" clearable />
@@ -393,49 +250,11 @@ onMounted(refreshKeys)
       </div>
     </section>
 
-    <t-dialog
-      v-model:visible="isEditDialogVisible"
-      header="编辑 Key"
-      width="520px"
-      :footer="false"
-      :close-on-overlay-click="!isUpdating"
-      :close-on-esc-keydown="!isUpdating"
-      @closed="resetEditForm"
-    >
-      <form class="edit-form" @submit.prevent="updateKey">
-        <label class="field">
-          <span>提供商</span>
-          <t-input v-model="editForm.provider" placeholder="DeepSeek / OfoxAI" clearable />
-        </label>
-
-        <label class="field">
-          <span>Key 名称</span>
-          <t-input v-model="editForm.name" placeholder="Chatbox / OpenCode" clearable />
-        </label>
-
-        <label class="field">
-          <span>Key 内容</span>
-          <t-input v-model="editForm.value" placeholder="留空表示不修改" clearable />
-        </label>
-
-        <div class="dialog-actions">
-          <p v-if="editErrorMessage" class="error-message">{{ editErrorMessage }}</p>
-          <span v-else></span>
-          <div class="dialog-buttons">
-            <t-button variant="outline" :disabled="isUpdating" @click="isEditDialogVisible = false">
-              取消
-            </t-button>
-            <t-button
-              theme="primary"
-              type="submit"
-              :disabled="isUpdating || isEditUnchanged"
-              :loading="isUpdating"
-            >
-              保存
-            </t-button>
-          </div>
-        </div>
-      </form>
-    </t-dialog>
+    <KeyEditDialog
+      v-if="selectedEditRecord"
+      :record="selectedEditRecord"
+      :update-key="updateKey"
+      @close="selectedEditRecord = null"
+    />
   </main>
 </template>

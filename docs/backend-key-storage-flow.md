@@ -1,173 +1,50 @@
-                              后端密钥存储流程图
-╔═════════════════════════════════════════════════════════════════════════════════════════╗
+# 后端密钥存储流程
 
-一、数据结构定义
-──────────────────────────────────────────────────────────────────────────────────────
+## 职责
 
-   结构体                                  说明
-   ─────────────────────────────────────── ──────────────────────────────────────────────
-   App                                    后端状态容器，持有 Wails 运行时 ctx
-   ├── ctx  context.Context               用于调用 runtime.ClipboardSetText 等前端 API
+- `app.go`：导出的 Wails 方法、密钥操作编排及系统剪贴板调用。
+- `key_store.go`：私有存储记录、JSON 文件读写、重复检查、加解密辅助和脱敏。
+- `dpapi_windows.go`：Windows DPAPI 加密与解密。
+- `dpapi_unsupported.go`：供非 Windows 构建环境使用的报错实现，调用加解密会返回不支持错误。
 
-   KeyRecord          (导出，返给前端)     对应 storedKeyRecord 的「脱敏版本」
-   ├── ID            string               唯一标识
-   ├── Provider      string               API 提供商
-   ├── Name          string               自定义名称
-   ├── MaskedValue   string               脱敏后的 key（如 sk-xxx***xxx）
-   └── CreatedAt     string               RFC3339 时间
+前端是唯一的用户交互入口，负责新增和编辑表单的必填校验。后端裁剪提供商、名称和新密钥内容的首尾空白，执行重复检查和存储操作。
 
-   storedKeyRecord    (内部，落盘)         磁盘存储的「加密版本」
-   ├── ID            string               唯一标识
-   ├── Provider      string               API 提供商
-   ├── Name          string               自定义名称
-   ├── EncryptedValue string              base64( DPAPI加密字节流 )
-   └── CreatedAt     string               RFC3339 时间
+## 数据与存储
 
+密钥文件位于 `%LOCALAPPDATA%\LLM Key Manager\keys.json`，内容为 JSON 数组。
 
-   App ────── 读写 ──────► storedKeyRecord[] ──── JSON序列化 ────► keys.json
+| 字段             | 落盘记录 `storedKeyRecord`       | 前端记录 `KeyRecord` |
+| ---------------- | -------------------------------- | -------------------- |
+| `id`             | 创建时使用纳秒时间戳生成的字符串 | 原样返回             |
+| `provider`       | 提供商                           | 原样返回             |
+| `name`           | 自定义名称                       | 原样返回             |
+| `encryptedValue` | DPAPI 加密字节的 Base64 编码     | 不返回               |
+| `maskedValue`    | 不存储                           | 解密后脱敏生成       |
+| `createdAt`      | RFC3339 格式的创建时间           | 原样返回             |
+| `updatedAt`      | RFC3339 格式的最后更新时间       | 原样返回             |
 
+读取文件时，文件不存在表示空列表；JSON 解析失败或记录必需字段为空时返回 `ERR_KEY_STORE_INVALID`。写入时创建存储目录，将 JSON 写入同目录临时文件，完成同步和关闭后替换目标文件；失败时清理临时文件。
 
-二、导出方法 → 内部函数 调用链
-──────────────────────────────────────────────────────────────────────────────────────
+## 操作流程
 
-  前端 (Vue/TS)                      内部函数 & 平台层                 OS / 磁盘
-  ══════════════                     ══════════════════              ═════════════
+| 方法        | 输入                         | 操作                                                     | 返回值       |
+| ----------- | ---------------------------- | -------------------------------------------------------- | ------------ |
+| `SaveKey`   | 提供商、名称、密钥内容       | 标准化输入，读取记录，检查重复，加密并追加记录，写回文件 | 错误或成功   |
+| `ListKeys`  | 无                           | 读取记录，逐条解密并脱敏                                 | 脱敏记录列表 |
+| `UpdateKey` | ID、提供商、名称、可选新密钥 | 查找记录，检查变化和重复，更新后写回文件                 | 错误或成功   |
+| `CopyKey`   | ID                           | 查找记录并解密，通过 Wails 运行时写入剪贴板              | 错误或成功   |
+| `DeleteKey` | ID                           | 删除匹配记录，写回文件                                   | 错误或成功   |
 
-  SaveKey(provider,name,value)
-  │
-  ├─ TrimSpace(三个参数)
-  ├─ readStoredKeys()
-  │      ├─ keyStorePath() ───────────► LOCALAPPDATA ──► filepath.Join
-  │      ├─ os.ReadFile(path) ─────────────────────────────────► %LOCALAPPDATA%\LLM Key Manager\keys.json
-  │      ├─ json.Unmarshal(data, &records)
-  │      └─ validateStoredKeys(records)
-  │
-  ├─ protectKeyValue(value) ──────────► dpapi_windows.go (DPAPI加密)
-  │                                     dpapi_unsupported.go (空实现)
-  │
-  ├─ base64.StdEncoding.EncodeToString(加密字节流)
-  ├─ strconv.FormatInt(time.Now().UnixNano(), 10) ──► ID 生成
-  ├─ time.Now().Format(time.RFC3339) ──► CreatedAt 生成
-  │
-  ├─ new storedKeyRecord{...}
-  │
-  └─ writeStoredKeys(records)
-         ├─ keyStorePath()
-         ├─ os.MkdirAll(filepath.Dir(path), 0755)
-         ├─ json.MarshalIndent(records)
-         └─ writeFileAtomically(path, data) ────────────────────► %LOCALAPPDATA%\LLM Key Manager\keys.json
+新增时，创建时间与更新时间使用同一次取时结果。相同提供商、名称和明文密钥的组合视为重复，返回 `ERR_KEY_DUPLICATE`。
 
+编辑时，新密钥内容留空表示保留已有密文。提供商、名称均未变化且新密钥内容留空时直接完成，不写文件；填写新密钥内容则执行替换。更新时保留创建时间并设置更新时间。重复检查排除当前记录，并使用更新后的提供商、名称和有效密钥内容进行比较。
 
-  ListKeys()
-  │
-  ├─ readStoredKeys()
-  │
-  └─ for each storedKeyRecord:
-         ├─ decryptStoredValue(record)
-         │      ├─ base64.StdEncoding.DecodeString(EncryptedValue)
-         │      └─ unprotectKeyValue(字节流) ─► dpapi_xxx.go (DPAPI解密)
-         │
-         ├─ maskKeyValue(明文)
-         │      └─ "sk-abcde...1234" ──► "sk-abcde***1234"
-         │
-         └─ new KeyRecord{ ID, Provider, Name, MaskedValue, CreatedAt }
+列表只返回脱敏内容：密钥按字节计长，长度超过 14 时保留前 10 位和后 4 位，中间显示 `***`；其他情况完全遮盖。复制操作在后端解密并写入剪贴板，不将明文返回前端。
 
+## 错误与界面反馈
 
-  CopyKey(id)
-  │
-  ├─ readStoredKeys()
-  │
-  ├─ 遍历找到 record.ID == id:
-  │      ├─ decryptStoredValue(record) ──► 得到明文
-  │      └─ runtime.ClipboardSetText(ctx, 明文) ────────────────► 系统剪贴板
-  │
-  └─ 未找到 ──► error "key record not found"
+重复记录与存储格式错误使用稳定错误码，前端翻译为中文提示。记录不存在、文件访问、Base64 解码、DPAPI 和剪贴板失败由后端返回错误，前端使用对应操作的中文提示。
 
+写入结果与列表刷新结果分别处理：写入失败时保留新增或编辑表单；写入成功后完成表单清理或关闭弹窗，即使后续刷新失败，也明确提示操作已经成功、需要重新刷新。
 
-  DeleteKey(id)
-  │
-  ├─ readStoredKeys()
-  ├─ 过滤: 移除 record.ID == id 的记录
-  │
-  └─ writeStoredKeys(过滤后的 records)
-
-
-
-三、数据流转：加密写入路径
-──────────────────────────────────────────────────────────────────────────────────────
-
-  用户输入                   处理中                      落盘字段
-  ══════════               ════════════               ═════════════════════
-  provider ──► TrimSpace ──────────────────────────► storedKeyRecord.Provider
-  name     ──► TrimSpace ──────────────────────────► storedKeyRecord.Name
-  value    ──► TrimSpace ──► DPAPI加密 ──► base64 ─► storedKeyRecord.EncryptedValue
-
-  time.Now() ──► UnixNano() ──► FormatInt ─────────► storedKeyRecord.ID
-  time.Now() ──► Format(RFC3339) ──────────────────► storedKeyRecord.CreatedAt
-
-                                       │
-                                       ▼
-                                    keys.json  (JSON 数组)
-
-
-
-四、数据流转：解密读取路径
-──────────────────────────────────────────────────────────────────────────────────────
-
-  keys.json (JSON数组)
-       │
-       ▼
-  storedKeyRecord[] ── 逐条读取 ──┬──► ID        ────────────────┬──────────────► KeyRecord.ID
-                                  ├──► Provider  ────────────────┤  直接传递     KeyRecord.Provider
-                                  ├──► Name      ────────────────┤              KeyRecord.Name
-                                  ├──► EncryptedValue ──────────┐│
-                                  │        │                    ││
-                                  │        ▼                    ││
-                                  │   base64.DecodeString       ││
-                                  │        │                    ││
-                                  │        ▼                    ││
-                                  │   unprotectKeyValue         ││
-                                  │   (DPAPI解密 → 明文)        ││
-                                  │        │                    ││
-                                  │        ▼                    ││
-                                  │   maskKeyValue() ───────────┤▼───► KeyRecord.MaskedValue
-                                  │                             │      ("sk-xxx***xxx")
-                                  └──► CreatedAt ───────────────┘      KeyRecord.CreatedAt
-
-                                                                       │
-                                                                       ▼
-                                                                  前端列表展示
-
-
-  CopyKey 分支:
-  ────────────
-  同一解密路径 ──► 明文 ──► runtime.ClipboardSetText() ──► 系统剪贴板
-
-
-
-五、方法 ↔ 数据 ↔ 磁盘 IO 速查表
-──────────────────────────────────────────────────────────────────────────────────────
-
-  方法        输入              操作的数据结构           输出类型        磁盘 IO
-  ──────     ────────────────  ──────────────────────  ─────────────  ────────
-  SaveKey    3 个 string       写入 storedKeyRecord     error          写
-  ListKeys   无                读取 → 脱敏 → KeyRecord  []KeyRecord    读
-  CopyKey    id (string)       读取 → 解密 → 明文       error          读
-  DeleteKey  id (string)       读取 → 过滤 → 重写       error          读 + 写
-
-
-六、内部函数一览
-──────────────────────────────────────────────────────────────────────────────────────
-
-  函数                       职责
-  ──────────────────────     ─────────────────────────────────────────────────────
-  readStoredKeys()           打开 %LOCALAPPDATA%\LLM Key Manager\keys.json → JSON反序列化 → 校验 → 返回 []storedKeyRecord
-  writeStoredKeys(records)   []storedKeyRecord → JSON序列化 → 写入 %LOCALAPPDATA%\LLM Key Manager\keys.json
-  validateStoredKeys(...)    检查每条记录的 ID/Provider/Name/EncryptedValue/CreatedAt 非空
-  keyStorePath()             返回 %LOCALAPPDATA%\LLM Key Manager\keys.json
-  decryptStoredValue(...)    base64解码 EncryptedValue → DPAPI解密 → 明文
-  maskKeyValue(...)          明文长度>14时前缀10字符+***+后缀4字符，否则全***
-  protectKeyValue(...)       DPAPI加密明文 → 返回字节流 (平台相关)
-  unprotectKeyValue(...)     DPAPI解密字节流 → 返回明文   (平台相关)
-
-╚═════════════════════════════════════════════════════════════════════════════════════════╝
+更多检查与用户验收步骤见 [开发指南](../DEVELOPMENT.md)。

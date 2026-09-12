@@ -3,22 +3,12 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-)
-
-const (
-	errKeyDuplicate    = "ERR_KEY_DUPLICATE"
-	errKeyStoreInvalid = "ERR_KEY_STORE_INVALID"
-	keyStoreDirectory  = "LLM Key Manager"
-	keyStoreFileName   = "keys.json"
 )
 
 // App manages backend state and exposes methods to the Wails frontend.
@@ -42,15 +32,6 @@ type KeyRecord struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
-type storedKeyRecord struct {
-	ID             string `json:"id"`
-	Provider       string `json:"provider"`
-	Name           string `json:"name"`
-	EncryptedValue string `json:"encryptedValue"`
-	CreatedAt      string `json:"createdAt"`
-	UpdatedAt      string `json:"updatedAt"`
-}
-
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{}
@@ -62,15 +43,11 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// SaveKey validates and stores an encrypted API key in the local key store.
+// SaveKey stores an encrypted API key after the frontend validates required fields.
 func (a *App) SaveKey(provider string, name string, value string) error {
 	provider = strings.TrimSpace(provider)
 	name = strings.TrimSpace(name)
 	value = strings.TrimSpace(value)
-
-	if provider == "" || name == "" || value == "" {
-		return errors.New("provider, name, and key content are required")
-	}
 
 	records, err := readStoredKeys()
 	if err != nil {
@@ -127,16 +104,12 @@ func (a *App) ListKeys() ([]KeyRecord, error) {
 	return records, nil
 }
 
-// UpdateKey updates key metadata and optionally replaces the encrypted key value.
+// UpdateKey updates frontend-validated metadata and optionally replaces the encrypted key value.
+// An empty value preserves the existing encrypted key.
 func (a *App) UpdateKey(id string, provider string, name string, value string) error {
-	id = strings.TrimSpace(id)
 	provider = strings.TrimSpace(provider)
 	name = strings.TrimSpace(name)
 	value = strings.TrimSpace(value)
-
-	if provider == "" || name == "" {
-		return errors.New("provider and name are required")
-	}
 
 	records, err := readStoredKeys()
 	if err != nil {
@@ -196,8 +169,6 @@ func (a *App) UpdateKey(id string, provider string, name string, value string) e
 
 // CopyKey decrypts the saved API key and writes the plaintext to the clipboard.
 func (a *App) CopyKey(id string) error {
-	id = strings.TrimSpace(id)
-
 	records, err := readStoredKeys()
 	if err != nil {
 		return err
@@ -213,10 +184,6 @@ func (a *App) CopyKey(id string) error {
 			return err
 		}
 
-		if a.ctx == nil {
-			return errors.New("application context is not ready")
-		}
-
 		return runtime.ClipboardSetText(a.ctx, value)
 	}
 
@@ -225,8 +192,6 @@ func (a *App) CopyKey(id string) error {
 
 // DeleteKey removes the saved API key matching the provided record ID.
 func (a *App) DeleteKey(id string) error {
-	id = strings.TrimSpace(id)
-
 	records, err := readStoredKeys()
 	if err != nil {
 		return err
@@ -248,150 +213,4 @@ func (a *App) DeleteKey(id string) error {
 	}
 
 	return writeStoredKeys(nextRecords)
-}
-
-func readStoredKeys() ([]storedKeyRecord, error) {
-	path, err := keyStorePath()
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return []storedKeyRecord{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	var records []storedKeyRecord
-	if err := json.Unmarshal(data, &records); err != nil {
-		return nil, errors.New(errKeyStoreInvalid)
-	}
-	if records == nil {
-		return []storedKeyRecord{}, nil
-	}
-	if err := validateStoredKeys(records); err != nil {
-		return nil, err
-	}
-
-	return records, nil
-}
-
-func writeStoredKeys(records []storedKeyRecord) error {
-	path, err := keyStorePath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(records, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return writeFileAtomically(path, data)
-}
-
-func writeFileAtomically(path string, data []byte) error {
-	directory := filepath.Dir(path)
-	tempFile, err := os.CreateTemp(directory, ".keys-*.tmp")
-	if err != nil {
-		return err
-	}
-
-	tempPath := tempFile.Name()
-	removeTempFile := true
-	defer func() {
-		if removeTempFile {
-			_ = os.Remove(tempPath)
-		}
-	}()
-
-	if _, err := tempFile.Write(data); err != nil {
-		_ = tempFile.Close()
-		return err
-	}
-	if err := tempFile.Sync(); err != nil {
-		_ = tempFile.Close()
-		return err
-	}
-	if err := tempFile.Close(); err != nil {
-		return err
-	}
-
-	if err := os.Rename(tempPath, path); err != nil {
-		return err
-	}
-	removeTempFile = false
-
-	return nil
-}
-
-func validateStoredKeys(records []storedKeyRecord) error {
-	for _, record := range records {
-		if strings.TrimSpace(record.ID) == "" ||
-			strings.TrimSpace(record.Provider) == "" ||
-			strings.TrimSpace(record.Name) == "" ||
-			strings.TrimSpace(record.EncryptedValue) == "" ||
-			strings.TrimSpace(record.CreatedAt) == "" ||
-			strings.TrimSpace(record.UpdatedAt) == "" {
-			return errors.New(errKeyStoreInvalid)
-		}
-	}
-
-	return nil
-}
-
-func ensureUniqueKeyRecord(records []storedKeyRecord, excludedID string, provider string, name string, value string) error {
-	for _, record := range records {
-		if record.ID == excludedID || strings.TrimSpace(record.Provider) != provider || strings.TrimSpace(record.Name) != name {
-			continue
-		}
-
-		storedValue, err := decryptStoredValue(record)
-		if err != nil {
-			return err
-		}
-		if storedValue == value {
-			return errors.New(errKeyDuplicate)
-		}
-	}
-
-	return nil
-}
-
-func decryptStoredValue(record storedKeyRecord) (string, error) {
-	protectedValue, err := base64.StdEncoding.DecodeString(record.EncryptedValue)
-	if err != nil {
-		return "", err
-	}
-
-	return unprotectKeyValue(protectedValue)
-}
-
-func maskKeyValue(value string) string {
-	const (
-		prefixLength  = 10
-		suffixLength  = 4
-		fullMask      = "*****************"
-		separatorMask = "***"
-	)
-
-	if len(value) <= prefixLength+suffixLength {
-		return fullMask
-	}
-
-	return value[:prefixLength] + separatorMask + value[len(value)-suffixLength:]
-}
-
-func keyStorePath() (string, error) {
-	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
-	if localAppData == "" {
-		return "", errors.New("LOCALAPPDATA is not set")
-	}
-
-	return filepath.Join(localAppData, keyStoreDirectory, keyStoreFileName), nil
 }

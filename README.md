@@ -94,7 +94,8 @@ GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangc
 
 ```text
 .
-├── app.go                 # Wails 后端绑定与本地密钥存储逻辑
+├── app.go                 # Wails 后端绑定与密钥操作编排
+├── key_store.go           # 加密存储、重复检查和脱敏辅助函数
 ├── main.go                # Wails 应用入口与窗口配置
 ├── dpapi_windows.go       # Windows DPAPI 加密/解密实现
 ├── frontend/src/          # Vue 3 前端源码
