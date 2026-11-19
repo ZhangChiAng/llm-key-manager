@@ -1,11 +1,17 @@
 <script lang="ts" setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { Loading } from 'tdesign-vue-next'
 import type { main } from '../wailsjs/go/models'
 import KeyEditDialog from './components/KeyEditDialog.vue'
 import ProviderInput from './components/ProviderInput.vue'
 import { useKeyManager } from './composables/useKeyManager'
 
 const {
+  providerPresets,
+  isProbing,
+  canProbe,
+  probeKeys,
+  probeState,
   keys,
   errorMessage,
   successMessage,
@@ -72,6 +78,7 @@ const groupedKeys = computed(() => {
  * including when reloading the saved list fails.
  */
 async function submitKey() {
+  if (isProbing.value) return
   clearMessages()
 
   if (!form.provider.trim() || !form.name.trim() || !form.value.trim()) {
@@ -91,6 +98,7 @@ async function submitKey() {
  * plaintext key material is not requested from the backend.
  */
 function openEditDialog(record: main.KeyRecord) {
+  if (isProbing.value) return
   clearMessages()
   selectedEditRecord.value = record
 }
@@ -119,6 +127,16 @@ function toggleProvider(provider: string) {
   expandedProviders.set(provider, !isProviderExpanded(provider))
 }
 
+const probeLabels: Record<string, string> = {
+  available: '可用',
+  authentication_failed: '认证失败',
+  insufficient_balance: '余额不足',
+  permission_denied: '权限受限',
+  rate_limited: '限流',
+  failed: '检测失败',
+  unsupported: '不支持检测',
+}
+
 onMounted(refreshKeys)
 </script>
 
@@ -130,7 +148,13 @@ onMounted(refreshKeys)
           <h1>LLM Key Manager</h1>
           <p>本地加密保存 API Key。</p>
         </div>
-        <t-button theme="default" variant="outline" :loading="isLoading" @click="refreshKeys">
+        <t-button
+          theme="default"
+          variant="outline"
+          :loading="isLoading"
+          :disabled="isProbing"
+          @click="refreshKeys"
+        >
           刷新
         </t-button>
       </div>
@@ -138,24 +162,31 @@ onMounted(refreshKeys)
       <form class="key-form" @submit.prevent="submitKey">
         <label class="field">
           <span>提供商</span>
-          <ProviderInput v-model="form.provider" />
+          <ProviderInput v-model="form.provider" :presets="providerPresets" :disabled="isProbing" />
         </label>
 
         <label class="field">
           <span>Key 名称</span>
-          <t-input v-model="form.name" placeholder="Chatbox / OpenCode" clearable />
+          <t-input
+            v-model="form.name"
+            :disabled="isProbing"
+            placeholder="Chatbox / OpenCode"
+            clearable
+          />
         </label>
 
         <label class="field field-wide">
           <span>Key 内容</span>
-          <t-input v-model="form.value" placeholder="sk-..." clearable />
+          <t-input v-model="form.value" :disabled="isProbing" placeholder="sk-..." clearable />
         </label>
 
         <div class="form-actions">
           <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
           <p v-else-if="successMessage" class="success-message">{{ successMessage }}</p>
           <span v-else></span>
-          <t-button theme="primary" type="submit" :loading="isSaving">保存</t-button>
+          <t-button theme="primary" type="submit" :loading="isSaving" :disabled="isProbing"
+            >保存</t-button
+          >
         </div>
       </form>
     </section>
@@ -163,7 +194,21 @@ onMounted(refreshKeys)
     <section class="panel table-panel">
       <div class="table-header">
         <h2>已保存 Key</h2>
-        <span>{{ keys.length }} 条记录</span>
+        <t-button
+          theme="default"
+          variant="outline"
+          :loading="isProbing"
+          :disabled="
+            isProbing ||
+            !canProbe ||
+            isLoading ||
+            isSaving ||
+            !!deletingKeyId ||
+            !!selectedEditRecord
+          "
+          @click="probeKeys"
+          >过期检测</t-button
+        >
       </div>
 
       <div v-if="keys.length === 0" class="empty-state">暂无记录</div>
@@ -207,7 +252,17 @@ onMounted(refreshKeys)
               <tbody>
                 <tr v-for="record in group.records" :key="record.id">
                   <td>{{ record.name }}</td>
-                  <td class="key-value">{{ record.maskedValue }}</td>
+                  <td class="key-value">
+                    {{ record.maskedValue }}
+                    <span class="probe-result" role="status">
+                      <Loading
+                        v-if="probeState(record) === 'probing'"
+                        size="small"
+                        aria-label="检测中"
+                      />
+                      <span v-else>{{ probeLabels[probeState(record)] }}</span>
+                    </span>
+                  </td>
                   <td>{{ formatDate(record.createdAt) }}</td>
                   <td>{{ formatDate(record.updatedAt) }}</td>
                   <td class="table-actions">
@@ -215,6 +270,7 @@ onMounted(refreshKeys)
                       theme="default"
                       variant="text"
                       size="small"
+                      :disabled="isProbing"
                       @click="openEditDialog(record)"
                     >
                       编辑
@@ -229,6 +285,7 @@ onMounted(refreshKeys)
                       复制
                     </t-button>
                     <t-popconfirm
+                      :confirm-btn="{ disabled: isProbing }"
                       content="确认删除这条 Key 记录？"
                       theme="danger"
                       @confirm="deleteKey(record)"
@@ -237,6 +294,7 @@ onMounted(refreshKeys)
                         theme="danger"
                         variant="text"
                         size="small"
+                        :disabled="isProbing"
                         :loading="deletingKeyId === record.id"
                       >
                         删除
@@ -254,6 +312,7 @@ onMounted(refreshKeys)
     <KeyEditDialog
       v-if="selectedEditRecord"
       :record="selectedEditRecord"
+      :presets="providerPresets"
       :update-key="updateKey"
       @close="selectedEditRecord = null"
     />

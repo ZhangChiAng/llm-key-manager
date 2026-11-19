@@ -13,7 +13,8 @@ import (
 
 // App manages backend state and exposes methods to the Wails frontend.
 type App struct {
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // KeyRecord describes API key metadata returned to the frontend.
@@ -40,7 +41,12 @@ func NewApp() *App {
 // startup is called when the app starts. The context is saved
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
+	a.ctx, a.cancel = context.WithCancel(ctx)
+}
+
+// shutdown cancels any outstanding probes when the desktop application exits.
+func (a *App) shutdown(_ context.Context) {
+	a.cancel()
 }
 
 // SaveKey stores an encrypted API key after the frontend validates required fields.

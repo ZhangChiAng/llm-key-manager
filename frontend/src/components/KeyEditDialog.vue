@@ -5,6 +5,7 @@ import ProviderInput from './ProviderInput.vue'
 
 /** The dialog receives metadata only; a blank key value preserves its ciphertext. */
 const props = defineProps<{
+  presets: string[]
   record: main.KeyRecord
   updateKey: (id: string, provider: string, name: string, value: string) => Promise<void>
 }>()
@@ -62,7 +63,7 @@ async function save() {
     <form class="edit-form" @submit.prevent="save">
       <label class="field">
         <span>提供商</span>
-        <ProviderInput v-model="form.provider" />
+        <ProviderInput v-model="form.provider" :presets="presets" />
       </label>
 
       <label class="field">

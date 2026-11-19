@@ -4,7 +4,7 @@ import type { AutoCompleteProps } from 'tdesign-vue-next'
 
 /** Custom provider names stay editable without being added to the fixed suggestions. */
 const provider = defineModel<string>({ required: true })
-const presets = ['DeepSeek', 'MiniMax', 'OfoxAI']
+defineProps<{ presets: string[]; disabled?: boolean }>()
 
 /** Selecting a suggestion with Enter must not also submit the surrounding form. */
 const selectProvider: NonNullable<AutoCompleteProps['onSelect']> = (_value, { e }) => {
@@ -16,6 +16,7 @@ const selectProvider: NonNullable<AutoCompleteProps['onSelect']> = (_value, { e 
   <AutoComplete
     v-model="provider"
     :options="presets"
+    :disabled="disabled"
     placeholder="选择或输入提供商"
     empty="可直接输入自定义提供商"
     filterable

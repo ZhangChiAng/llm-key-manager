@@ -1,9 +1,63 @@
-import { ref } from 'vue'
-import { CopyKey, DeleteKey, ListKeys, SaveKey, UpdateKey } from '../../wailsjs/go/main/App'
+import { computed, ref } from 'vue'
+import {
+  CopyKey,
+  DeleteKey,
+  ListKeys,
+  ListProviderPresets,
+  ProbeKey,
+  SaveKey,
+  UpdateKey,
+} from '../../wailsjs/go/main/App'
 import type { main } from '../../wailsjs/go/models'
 
 /** Manages saved key records, backend operations, and page-level feedback. */
 export function useKeyManager() {
+  const providerPresets = ref<string[]>([])
+  const presetsLoaded = ref(false)
+  const isProbing = ref(false)
+  const probeStates = ref(new Map<string, string>())
+  const canProbe = computed(() => keys.value.some(isProbeSupported))
+
+  function isProbeSupported(record: main.KeyRecord) {
+    return providerPresets.value.includes(record.provider.trim())
+  }
+
+  /** Keeps transient conclusions in memory; custom providers never send requests. */
+  async function probeKeys() {
+    if (
+      isProbing.value ||
+      isLoading.value ||
+      isSaving.value ||
+      deletingKeyId.value ||
+      !canProbe.value
+    )
+      return
+    clearMessages()
+    isProbing.value = true
+    const records = keys.value.filter(isProbeSupported)
+    for (const record of records) probeStates.value.set(record.id, 'probing')
+    try {
+      await Promise.allSettled(
+        records.map(async (record) => {
+          try {
+            const result = await ProbeKey(record.id)
+            probeStates.value.set(record.id, result.status)
+          } catch (error) {
+            probeStates.value.set(record.id, 'failed')
+            errorMessage.value = getErrorMessage(error, '读取或解密 Key 失败')
+          }
+        }),
+      )
+    } finally {
+      isProbing.value = false
+    }
+  }
+
+  function probeState(record: main.KeyRecord) {
+    if (presetsLoaded.value && !isProbeSupported(record)) return 'unsupported'
+    return probeStates.value.get(record.id) ?? ''
+  }
+
   const keys = ref<main.KeyRecord[]>([])
   const errorMessage = ref('')
   const successMessage = ref('')
@@ -23,7 +77,19 @@ export function useKeyManager() {
     isLoading.value = true
 
     try {
-      keys.value = await ListKeys()
+      const [records, presets] = await Promise.all([ListKeys(), ListProviderPresets()])
+      const previous = new Map(keys.value.map((record) => [record.id, JSON.stringify(record)]))
+      probeStates.value = new Map(
+        records.flatMap((record) => {
+          const state = probeStates.value.get(record.id)
+          return state && previous.get(record.id) === JSON.stringify(record)
+            ? [[record.id, state]]
+            : []
+        }),
+      )
+      keys.value = records
+      providerPresets.value = presets
+      presetsLoaded.value = true
       return true
     } catch (error) {
       errorMessage.value = getErrorMessage(error, '读取 Key 列表失败')
@@ -44,6 +110,7 @@ export function useKeyManager() {
 
   /** Returns write success so the caller can clear a persisted draft. */
   async function saveKey(provider: string, name: string, value: string): Promise<boolean> {
+    if (isProbing.value) return false
     clearMessages()
     isSaving.value = true
 
@@ -66,10 +133,12 @@ export function useKeyManager() {
     name: string,
     value: string,
   ): Promise<void> {
+    if (isProbing.value) throw new Error('检测期间无法修改记录')
     clearMessages()
 
     try {
       await UpdateKey(id, provider, name, value)
+      probeStates.value.delete(id)
     } catch (error) {
       throw new Error(getErrorMessage(error, '更新 Key 失败'), { cause: error })
     }
@@ -94,11 +163,13 @@ export function useKeyManager() {
 
   /** Deletes the confirmed record and reloads the saved list. */
   async function deleteKey(record: main.KeyRecord) {
+    if (isProbing.value) return
     clearMessages()
     deletingKeyId.value = record.id
 
     try {
       await DeleteKey(record.id)
+      probeStates.value.delete(record.id)
       await refreshAfterWrite('删除')
     } catch (error) {
       errorMessage.value = getErrorMessage(error, '删除 Key 失败')
@@ -108,6 +179,11 @@ export function useKeyManager() {
   }
 
   return {
+    providerPresets,
+    isProbing,
+    canProbe,
+    probeKeys,
+    probeState,
     keys,
     errorMessage,
     successMessage,

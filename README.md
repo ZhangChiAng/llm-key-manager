@@ -12,6 +12,7 @@ LLM Key Manager 是一个面向 Windows 的本地 API Key 管理桌面应用，�
 - 支持编辑提供商、名称，或在需要时替换 Key 内容。
 - 支持一键复制明文 Key 到系统剪贴板。
 - 支持删除不再使用的 Key 记录。
+- 支持并行检测预设提供商的已保存 Key，逐条显示检测结论。
 - 保存前会检查相同提供商、名称和 Key 内容的重复记录。
 
 ## 安全模型
@@ -43,6 +44,24 @@ LLM Key Manager 是一个面向 Windows 的本地 API Key 管理桌面应用，�
 2. 下方列表按提供商分组展示已保存记录，可展开分组后执行编辑、复制或删除操作。
 
 编辑记录时，Key 内容输入框默认留空；留空表示只更新提供商或名称，不修改已保存的密钥内容。
+
+### 过期检测
+
+点击“过期检测”立即并行检测所有预设提供商的已保存 Key，每条发送一次真实请求，会产生少量 API 用量。展开提供商分组后，Key 内容旁会逐条显示转圈标记，完成后显示“可用”“认证失败”“余额不足”“权限受限”“限流”或“检测失败”。自定义提供商显示“不支持检测”，不会发送请求。
+
+| 提供商          | 请求地址                                     | 固定模型          |
+| --------------- | -------------------------------------------- | ----------------- |
+| DeepSeek        | `https://api.deepseek.com/chat/completions`  | `deepseek-flash`  |
+| MiniMax（国内） | `https://api.minimax.cn/v1/chat/completions` | `MiniMax-M3`      |
+| OfoxAI          | `https://api.ofox.io/v1/chat/completions`    | `qwen/qwen-flash` |
+
+请求仅发送用户消息 `Hi`，使用 `stream: false`、`max_tokens: 1`，DeepSeek 和 MiniMax 显式关闭思考。每条请求最多等待 30 秒，随应用生命周期取消，不自动重试、切换模型或跟随重定向。密钥由后端解密并通过 Bearer 请求头发送给对应提供商，前端只传记录 ID、接收结论；不记录或展示请求头、明文密钥及原始响应体。
+
+“可用”仅表示当前固定模型返回了有效生成响应，输出达到长度限制也算成功。余额不足、限流、网络异常不能据此判为 Key 过期；模型不可用、异常响应及未知错误显示“检测失败”。固定模型名称可能随服务商调整，需在实际账户中确认可调用性。
+
+检测期间禁用重复检测、保存、编辑和删除；没有可检测记录时禁用按钮。结果仅保存在本次运行的内存中，普通刷新保留未变更记录的结果，修改或删除后清除对应结果，重启后清空。检测不会更改存储格式或记录更新时间。
+
+接口参考：[DeepSeek](https://api-docs.deepseek.com/api/create-chat-completion/)、[MiniMax](https://platform.minimax.cn/docs/api-reference/text-openai-api)、[MiniMax 错误码](https://platform.minimax.cn/docs/api-reference/errorcode)、[OfoxAI](https://ofox.ai/docs/api)。
 
 ## 从源码构建
 

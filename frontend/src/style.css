@@ -87,8 +87,11 @@ h2 {
   color: #111827;
 }
 
-.panel-header p,
-.table-header span {
+.table-header {
+  align-items: center;
+}
+
+.panel-header p {
   margin-top: 8px;
   color: #667085;
 }
@@ -276,7 +279,6 @@ tbody tr:last-child td {
   }
 
   .panel-header,
-  .table-header,
   .form-actions,
   .dialog-actions {
     flex-direction: column;
@@ -296,4 +298,16 @@ tbody tr:last-child td {
   td {
     padding: 12px;
   }
+}
+
+.probe-result {
+  font-size: 12px;
+  color: #667085;
+}
+
+.probe-result {
+  display: inline-flex;
+  margin-left: 8px;
+  vertical-align: middle;
+  font-family: 'Segoe UI', sans-serif;
 }
