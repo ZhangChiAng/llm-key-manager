@@ -163,10 +163,10 @@ func maskKeyValue(value string) string {
 }
 
 func keyStorePath() (string, error) {
-	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
-	if localAppData == "" {
-		return "", errors.New("LOCALAPPDATA is not set")
+	baseDir, err := keyStoreBaseDir()
+	if err != nil {
+		return "", err
 	}
 
-	return filepath.Join(localAppData, keyStoreDirectory, keyStoreFileName), nil
+	return filepath.Join(baseDir, keyStoreDirectory, keyStoreFileName), nil
 }

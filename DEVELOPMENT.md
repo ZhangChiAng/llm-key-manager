@@ -1,16 +1,18 @@
 # llm-key-manager 开发指南
 
-本项目是基于 Wails、Go、Vue 3 和 TypeScript 的 Windows 个人应用，前端是唯一的用户交互入口。表单必填校验由前端负责；后端负责输入标准化、重复 Key 检查、加密存储和系统调用。
+本项目是基于 Wails、Go、Vue 3 和 TypeScript 的 Windows 和 macOS 个人应用，前端是唯一的用户交互入口。表单必填校验由前端负责；后端负责输入标准化、重复 Key 检查、加密存储和系统调用。
 
-项目不再维护单元测试，也不引入测试框架、测试脚本或测试专用依赖注入。验证统一由编译、lint 和用户在 Windows 上进行的端到端测试完成。
+项目不再维护单元测试，也不引入测试框架、测试脚本或测试专用依赖注入。验证统一由编译、lint 和用户分别在 Windows 和 macOS 上进行的端到端测试完成。
 
 ## 开发环境
 
-当前在远程 Linux 服务器上开发并交叉编译 Windows 产物。准备 Go、Node.js 24 或以上版本、Wails CLI 和 golangci-lint；安装 Windows 交叉编译和打包工具：
+当前在远程 Linux 服务器上开发并交叉编译 Windows 产物；macOS 产物只能在 Mac 上构建。准备 Go、Node.js 24 或以上版本、Wails CLI 和 golangci-lint；安装 Windows 交叉编译和打包工具：
 
 ```bash
 sudo apt install -y mingw-w64 nsis
 ```
+
+在 Mac 上构建时，另需 Xcode Command Line Tools（`xcode-select --install`）、Go、Node.js 24 或以上版本和 Wails CLI。
 
 从项目根目录安装锁文件指定的前端依赖：
 
@@ -19,7 +21,7 @@ cd frontend
 npm ci
 ```
 
-远程无桌面环境不要运行 `wails dev`。桌面行为通过构建出的 Windows 程序验证。
+远程无桌面环境不要运行 `wails dev`。桌面行为通过构建出的 Windows 程序和 macOS 应用验证。
 
 ## 修改后的检查
 
@@ -51,11 +53,18 @@ npm run docs:lint
 npm run build
 ```
 
-回到项目根目录，执行后端 lint 和 Windows 集成构建：
+回到项目根目录，分别以 Linux 主机默认平台、Windows 和 macOS 为目标执行后端 lint。Linux 主机默认平台不会编译 `platform_windows.go` 和 `platform_darwin.go`，三条都要执行：
 
 ```bash
 cd ..
 GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
+GOOS=windows GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
+GOOS=darwin CGO_ENABLED=0 GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
+```
+
+执行 Windows 集成构建：
+
+```bash
 GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64
 ```
 
@@ -65,17 +74,28 @@ GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windo
 GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64 -nsis
 ```
 
+macOS 集成构建只能在 Mac 上执行：
+
+```bash
+GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform darwin/universal
+```
+
+构建产物为 `build/bin/llm-key-manager.app`。在 Linux 服务器上无法执行该命令，完成报告中标记为未执行。
+
 ## 用户端到端验收
 
-将生成的 `.exe` 或安装包交由用户在 Windows 桌面环境中运行，使用临时测试记录验收：
+将 `.exe` 或安装包交由用户在 Windows 桌面环境中运行，将 `.app` 交由用户在 macOS 桌面环境中运行，两个平台都使用临时测试记录验收：
 
-1. 应用正常启动，WebView2 加载完成，已有记录可以读取。
+1. 应用正常启动，WebView（Windows 上为 WebView2）加载完成，已有记录可以读取。
 2. 新增 Key，确认必填提示、列表脱敏、提供商分组和更新时间排序。
 3. 保存相同提供商、名称和内容的 Key，确认重复提示。
 4. 编辑提供商或名称，Key 内容留空；复制确认原密钥保留。再填写新内容，确认密钥被替换。
 5. 复制 Key，确认系统剪贴板内容正确。
 6. 删除测试记录，确认列表和数量更新。
 7. 关闭并重新启动，确认保存和删除结果保留。
+
+- Windows 额外检查：在已有旧版本记录的机器上，确认原有记录仍能读取、复制和检测。
+- macOS 额外检查：首次保存后，“钥匙串访问”的登录钥匙串中出现服务为 `llm-key-manager`、账户为 `master-key` 的通用密码项；重启应用及重新构建后读取记录不弹出钥匙串授权提示；输入框中 Cmd+C、Cmd+V、Cmd+A 可用。若 `.app` 经网络传到另一台 Mac，首次打开被 Gatekeeper 拦截时在 Finder 中右键选择“打开”。
 
 写入失败时表单内容应保留；如果写入已经成功而后续列表读取失败，界面应明确提示操作成功、需要重新刷新。
 

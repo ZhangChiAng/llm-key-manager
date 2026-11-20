@@ -1,8 +1,8 @@
 # LLM Key Manager
 
-LLM Key Manager 是一个面向 Windows 的本地 API Key 管理桌面应用，用于集中保存、查看、复制和维护大模型服务商的访问密钥。
+LLM Key Manager 是一个面向 Windows 和 macOS 的本地 API Key 管理桌面应用，用于集中保存、查看、复制和维护大模型服务商的访问密钥。
 
-项目基于 Wails、Go、Vue 3 和 TypeScript 构建。密钥内容仅保存在本机，后端使用 Windows DPAPI 加密落盘；前端列表只展示脱敏后的 Key，复制时由后端解密并写入系统剪贴板，避免把明文密钥作为列表数据返回给界面。
+项目基于 Wails、Go、Vue 3 和 TypeScript 构建。密钥内容仅保存在本机，后端在 Windows 上使用 DPAPI、在 macOS 上使用 AES-256-GCM 加密落盘；前端列表只展示脱敏后的 Key，复制时由后端解密并写入系统剪贴板，避免把明文密钥作为列表数据返回给界面。
 
 ## 功能特性
 
@@ -19,13 +19,14 @@ LLM Key Manager 是一个面向 Windows 的本地 API Key 管理桌面应用，�
 
 当前版本采用本地单机安全模型：
 
-- 密钥文件位于当前 Windows 用户的本机应用数据目录：`%LOCALAPPDATA%\LLM Key Manager\keys.json`。
-- `keys.json` 中的 Key 内容使用 Windows DPAPI 加密后再 Base64 编码保存。
-- 加密和解密能力依赖当前 Windows 用户环境，项目不提供云同步、远程备份或跨平台解密。
+- 密钥文件位于当前用户的本机应用数据目录：Windows 为 `%LOCALAPPDATA%\LLM Key Manager\keys.json`，macOS 为 `~/Library/Application Support/LLM Key Manager/keys.json`。
+- Windows 上，Key 内容使用 Windows DPAPI 加密后再 Base64 编码保存。
+- macOS 上，Key 内容使用 AES-256-GCM 加密，随机 nonce 与密文拼接后 Base64 编码保存。32 字节主密钥在首次保存时随机生成，存放在登录钥匙串的通用密码项中（服务 `llm-key-manager`，账户 `master-key`），应用通过系统自带的 `/usr/bin/security` 读取；重新构建未签名应用后不会反复弹出钥匙串授权提示。删除该钥匙串项后，已保存的 Key 无法再解密。
+- 两个平台的解密能力都绑定当前系统用户，项目不提供云同步、远程备份或跨平台解密，`keys.json` 不能在 Windows 和 macOS 之间互相拷贝使用。
 - 前端 `ListKeys` 只接收脱敏后的 Key；复制明文 Key 时通过 Wails 后端直接写入剪贴板。
 - 如果 `keys.json` 被手动破坏为非法格式，应用会返回本地存储格式异常提示。
 
-这不是团队级密钥保险箱，也不替代企业 KMS、密码管理器或集中审计系统。它更适合个人在 Windows 桌面上管理多个 LLM 客户端、工具或服务商所需的 API Key。
+这不是团队级密钥保险箱，也不替代企业 KMS、密码管理器或集中审计系统。它更适合个人在 Windows 或 macOS 桌面上管理多个 LLM 客户端、工具或服务商所需的 API Key。
 
 ## 技术栈
 
@@ -33,8 +34,8 @@ LLM Key Manager 是一个面向 Windows 的本地 API Key 管理桌面应用，�
 - 后端：Go
 - 前端：Vue 3、TypeScript、Vite
 - UI 组件：TDesign Vue Next
-- 本地加密：Windows DPAPI
-- 目标平台：Windows
+- 本地加密：Windows DPAPI；macOS AES-256-GCM（主密钥保存在钥匙串）
+- 目标平台：Windows、macOS
 
 ## 界面与使用流程
 
@@ -65,7 +66,7 @@ LLM Key Manager 是一个面向 Windows 的本地 API Key 管理桌面应用，�
 
 ## 从源码构建
 
-当前仓库按 Windows 桌面应用维护。可以在 Linux 环境中交叉编译 Windows 产物，但真实运行效果仍应在 Windows 桌面环境验证。
+当前仓库按 Windows 和 macOS 桌面应用维护。可以在 Linux 环境中交叉编译 Windows 产物；macOS 产物需在安装了 Xcode Command Line Tools 的 Mac 上构建。真实运行效果应分别在 Windows 和 macOS 桌面环境验证。
 
 准备前端依赖：
 
@@ -87,7 +88,13 @@ GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windo
 GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64 -nsis
 ```
 
-构建产物位于 `build/bin/`。
+在 Mac 上构建 macOS 应用（同时包含 Apple Silicon 和 Intel 架构）：
+
+```bash
+GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform darwin/universal
+```
+
+构建产物位于 `build/bin/`（Windows 为 `llm-key-manager.exe`，macOS 为 `llm-key-manager.app`）。
 
 ## 开发检查
 
@@ -105,6 +112,8 @@ npm run build
 ```bash
 cd ..
 GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
+GOOS=windows GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
+GOOS=darwin CGO_ENABLED=0 GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
 ```
 
 更完整的开发说明见 [DEVELOPMENT.md](DEVELOPMENT.md)。
@@ -113,16 +122,19 @@ GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangc
 
 ```text
 .
-├── app.go                 # Wails 后端绑定与密钥操作编排
-├── key_store.go           # 加密存储、重复检查和脱敏辅助函数
-├── main.go                # Wails 应用入口与窗口配置
-├── dpapi_windows.go       # Windows DPAPI 加密/解密实现
-├── frontend/src/          # Vue 3 前端源码
-├── frontend/wailsjs/      # Wails 生成的前端绑定
-├── build/windows/         # Windows 打包资源
-└── docs/                  # 设计与实现说明
+├── app.go                  # Wails 后端绑定与密钥操作编排
+├── key_store.go            # 加密存储、重复检查和脱敏辅助函数
+├── main.go                 # Wails 应用入口与窗口配置
+├── platform_windows.go     # Windows DPAPI 加密/解密与存储目录
+├── platform_darwin.go      # macOS AES-GCM 加密/解密、钥匙串主密钥与存储目录
+├── platform_unsupported.go # 仅供 Linux 开发机类型检查的报错实现
+├── frontend/src/           # Vue 3 前端源码
+├── frontend/wailsjs/       # Wails 生成的前端绑定
+├── build/windows/          # Windows 打包资源
+├── build/darwin/           # macOS 打包资源
+└── docs/                   # 设计与实现说明
 ```
 
 ## 平台说明
 
-本项目是 Windows-only 桌面应用。仓库中的 `build/darwin/` 是 Wails 模板遗留材料，并不表示项目支持 macOS。
+本项目支持 Windows 和 macOS 桌面，不支持 Linux 桌面。`platform_unsupported.go` 只用于让 Linux 开发机通过类型检查和 lint，在该环境调用存储会返回不支持错误。

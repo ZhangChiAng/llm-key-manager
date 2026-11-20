@@ -3,6 +3,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -57,4 +60,15 @@ func dataBlobBytes(blob windows.DataBlob) []byte {
 	copy(value, unsafe.Slice(blob.Data, blob.Size))
 
 	return value
+}
+
+// keyStoreBaseDir returns %LOCALAPPDATA%. The trimming and error text match earlier
+// releases so existing %LOCALAPPDATA%\LLM Key Manager\keys.json files keep loading.
+func keyStoreBaseDir() (string, error) {
+	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	if localAppData == "" {
+		return "", errors.New("LOCALAPPDATA is not set")
+	}
+
+	return localAppData, nil
 }

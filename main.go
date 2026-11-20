@@ -1,4 +1,4 @@
-// Package main configures the Windows Wails desktop application.
+// Package main configures the Wails desktop application for Windows and macOS.
 package main
 
 import (

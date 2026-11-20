@@ -3,25 +3,28 @@
 ## 职责
 
 - `app.go`：导出的 Wails 方法、密钥操作编排及系统剪贴板调用。
-- `key_store.go`：私有存储记录、JSON 文件读写、重复检查、加解密辅助和脱敏。
-- `dpapi_windows.go`：Windows DPAPI 加密与解密。
-- `dpapi_unsupported.go`：供非 Windows 构建环境使用的报错实现，调用加解密会返回不支持错误。
+- `key_store.go`：私有存储记录、JSON 文件读写、存储路径拼接、重复检查、加解密辅助和脱敏。
+- `platform_windows.go`：Windows DPAPI 加密与解密，存储根目录取 `%LOCALAPPDATA%`。
+- `platform_darwin.go`：macOS AES-256-GCM 加密与解密，主密钥保存在登录钥匙串，存储根目录取 `~/Library/Application Support`。
+- `platform_unsupported.go`：仅供 Linux 开发机通过类型检查和 lint 的报错实现，调用加解密或获取存储目录会返回不支持错误。
 
 前端是唯一的用户交互入口，负责新增和编辑表单的必填校验。后端裁剪提供商、名称和新密钥内容的首尾空白，执行重复检查和存储操作。
 
 ## 数据与存储
 
-密钥文件位于 `%LOCALAPPDATA%\LLM Key Manager\keys.json`，内容为 JSON 数组。
+密钥文件位于平台应用数据目录：Windows 为 `%LOCALAPPDATA%\LLM Key Manager\keys.json`，macOS 为 `~/Library/Application Support/LLM Key Manager/keys.json`。两个平台内容均为 JSON 数组，格式相同。
 
-| 字段             | 落盘记录 `storedKeyRecord`       | 前端记录 `KeyRecord` |
-| ---------------- | -------------------------------- | -------------------- |
-| `id`             | 创建时使用纳秒时间戳生成的字符串 | 原样返回             |
-| `provider`       | 提供商                           | 原样返回             |
-| `name`           | 自定义名称                       | 原样返回             |
-| `encryptedValue` | DPAPI 加密字节的 Base64 编码     | 不返回               |
-| `maskedValue`    | 不存储                           | 解密后脱敏生成       |
-| `createdAt`      | RFC3339 格式的创建时间           | 原样返回             |
-| `updatedAt`      | RFC3339 格式的最后更新时间       | 原样返回             |
+| 字段             | 落盘记录 `storedKeyRecord`                                                                          | 前端记录 `KeyRecord` |
+| ---------------- | --------------------------------------------------------------------------------------------------- | -------------------- |
+| `id`             | 创建时使用纳秒时间戳生成的字符串                                                                    | 原样返回             |
+| `provider`       | 提供商                                                                                              | 原样返回             |
+| `name`           | 自定义名称                                                                                          | 原样返回             |
+| `encryptedValue` | 平台加密字节的 Base64 编码：Windows 为 DPAPI 密文，macOS 为 nonce 与 AES-GCM 密文（含认证标签）拼接 | 不返回               |
+| `maskedValue`    | 不存储                                                                                              | 解密后脱敏生成       |
+| `createdAt`      | RFC3339 格式的创建时间                                                                              | 原样返回             |
+| `updatedAt`      | RFC3339 格式的最后更新时间                                                                          | 原样返回             |
+
+macOS 主密钥为 32 字节随机值，以十六进制字符串保存为登录钥匙串中的通用密码项（服务 `llm-key-manager`，账户 `master-key`）。后端通过 `/usr/bin/security` 访问钥匙串：读取使用 `find-generic-password -w`，退出码 44 表示不存在；创建时把 `add-generic-password` 命令经标准输入传给 `security -i`，密钥不出现在进程参数中，且不使用 `-U`，不会覆盖已有项，写入后回读比对。只有加密会在主密钥缺失时创建；解密时缺失直接返回错误。主密钥在进程内缓存并由互斥锁保护，并行检测和逐条解密不会重复调用 `security` 或重复创建。该方案与不带额外熵的 DPAPI 一样把解密能力绑定到当前系统用户；由 `security` 创建的钥匙串项信任该工具本身，未签名应用重新构建后读取不会反复弹出授权提示。
 
 读取文件时，文件不存在表示空列表；JSON 解析失败或记录必需字段为空时返回 `ERR_KEY_STORE_INVALID`。写入时创建存储目录，将 JSON 写入同目录临时文件，完成同步和关闭后替换目标文件；失败时清理临时文件。
 
@@ -43,7 +46,7 @@
 
 ## 错误与界面反馈
 
-重复记录与存储格式错误使用稳定错误码，前端翻译为中文提示。记录不存在、文件访问、Base64 解码、DPAPI 和剪贴板失败由后端返回错误，前端使用对应操作的中文提示。
+重复记录与存储格式错误使用稳定错误码，前端翻译为中文提示。记录不存在、文件访问、Base64 解码、DPAPI、macOS 钥匙串与 AES-GCM 解密和剪贴板失败由后端返回错误，前端使用对应操作的中文提示。
 
 写入结果与列表刷新结果分别处理：写入失败时保留新增或编辑表单；写入成功后完成表单清理或关闭弹窗，即使后续刷新失败，也明确提示操作已经成功、需要重新刷新。
 
