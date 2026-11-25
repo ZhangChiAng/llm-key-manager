@@ -1,7 +1,6 @@
-package main
+package keystore
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,7 +9,6 @@ import (
 )
 
 const (
-	errKeyDuplicate    = "ERR_KEY_DUPLICATE"
 	errKeyStoreInvalid = "ERR_KEY_STORE_INVALID"
 	keyStoreDirectory  = "LLM Key Manager"
 	keyStoreFileName   = "keys.json"
@@ -25,8 +23,8 @@ type storedKeyRecord struct {
 	UpdatedAt      string `json:"updatedAt"`
 }
 
-func readStoredKeys() ([]storedKeyRecord, error) {
-	path, err := keyStorePath()
+func load() ([]storedKeyRecord, error) {
+	path, err := filePath()
 	if err != nil {
 		return nil, err
 	}
@@ -46,15 +44,15 @@ func readStoredKeys() ([]storedKeyRecord, error) {
 	if records == nil {
 		return []storedKeyRecord{}, nil
 	}
-	if err := validateStoredKeys(records); err != nil {
+	if err := validate(records); err != nil {
 		return nil, err
 	}
 
 	return records, nil
 }
 
-func writeStoredKeys(records []storedKeyRecord) error {
-	path, err := keyStorePath()
+func save(records []storedKeyRecord) error {
+	path, err := filePath()
 	if err != nil {
 		return err
 	}
@@ -105,7 +103,7 @@ func writeFileAtomically(path string, data []byte) error {
 	return nil
 }
 
-func validateStoredKeys(records []storedKeyRecord) error {
+func validate(records []storedKeyRecord) error {
 	for _, record := range records {
 		if strings.TrimSpace(record.ID) == "" ||
 			strings.TrimSpace(record.Provider) == "" ||
@@ -120,49 +118,7 @@ func validateStoredKeys(records []storedKeyRecord) error {
 	return nil
 }
 
-func ensureUniqueKeyRecord(records []storedKeyRecord, excludedID string, provider string, name string, value string) error {
-	for _, record := range records {
-		if record.ID == excludedID || strings.TrimSpace(record.Provider) != provider || strings.TrimSpace(record.Name) != name {
-			continue
-		}
-
-		storedValue, err := decryptStoredValue(record)
-		if err != nil {
-			return err
-		}
-		if storedValue == value {
-			return errors.New(errKeyDuplicate)
-		}
-	}
-
-	return nil
-}
-
-func decryptStoredValue(record storedKeyRecord) (string, error) {
-	protectedValue, err := base64.StdEncoding.DecodeString(record.EncryptedValue)
-	if err != nil {
-		return "", err
-	}
-
-	return unprotectKeyValue(protectedValue)
-}
-
-func maskKeyValue(value string) string {
-	const (
-		prefixLength  = 10
-		suffixLength  = 4
-		fullMask      = "*****************"
-		separatorMask = "***"
-	)
-
-	if len(value) <= prefixLength+suffixLength {
-		return fullMask
-	}
-
-	return value[:prefixLength] + separatorMask + value[len(value)-suffixLength:]
-}
-
-func keyStorePath() (string, error) {
+func filePath() (string, error) {
 	baseDir, err := keyStoreBaseDir()
 	if err != nil {
 		return "", err

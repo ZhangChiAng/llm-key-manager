@@ -1,17 +1,18 @@
 <script lang="ts" setup>
 import { computed, reactive, ref } from 'vue'
 import type { main } from '../../wailsjs/go/models'
-import ProviderInput from './ProviderInput.vue'
+import { useKeyManager } from '../composables/useKeyManager'
+import KeyForm from './KeyForm.vue'
 
 /** The dialog receives metadata only; a blank key value preserves its ciphertext. */
 const props = defineProps<{
-  presets: string[]
   record: main.KeyRecord
-  updateKey: (id: string, provider: string, name: string, value: string) => Promise<void>
 }>()
 const emit = defineEmits<{
   close: []
 }>()
+
+const { providerPresets, updateKey } = useKeyManager()
 
 const form = reactive({
   provider: props.record.provider,
@@ -32,15 +33,10 @@ const isUnchanged = computed(
 async function save() {
   errorMessage.value = ''
 
-  if (!form.provider.trim() || !form.name.trim()) {
-    errorMessage.value = '请填写提供商和 Key 名称'
-    return
-  }
-
   isUpdating.value = true
 
   try {
-    await props.updateKey(props.record.id, form.provider, form.name, form.value)
+    await updateKey(props.record.id, form.provider, form.name, form.value)
     isVisible.value = false
   } catch (error) {
     errorMessage.value = (error as Error).message
@@ -60,39 +56,64 @@ async function save() {
     :close-on-esc-keydown="!isUpdating"
     @closed="emit('close')"
   >
-    <form class="edit-form" @submit.prevent="save">
-      <label class="field">
-        <span>提供商</span>
-        <ProviderInput v-model="form.provider" :presets="presets" />
-      </label>
-
-      <label class="field">
-        <span>Key 名称</span>
-        <t-input v-model="form.name" placeholder="Chatbox / OpenCode" clearable />
-      </label>
-
-      <label class="field">
-        <span>Key 内容</span>
-        <t-input v-model="form.value" placeholder="留空表示不修改" clearable />
-      </label>
-
-      <div class="dialog-actions">
-        <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
-        <span v-else></span>
-        <div class="dialog-buttons">
-          <t-button variant="outline" :disabled="isUpdating" @click="isVisible = false">
-            取消
-          </t-button>
-          <t-button
-            theme="primary"
-            type="submit"
-            :disabled="isUpdating || isUnchanged"
-            :loading="isUpdating"
-          >
-            保存
-          </t-button>
+    <KeyForm
+      v-model:provider="form.provider"
+      v-model:name="form.name"
+      v-model:value="form.value"
+      :presets="providerPresets"
+      :require-value="false"
+      layout="stacked"
+      value-placeholder="留空表示不修改"
+      @submit="save"
+      @invalid="errorMessage = $event"
+    >
+      <template #actions>
+        <div class="dialog-actions">
+          <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
+          <span v-else></span>
+          <div class="dialog-buttons">
+            <t-button variant="outline" :disabled="isUpdating" @click="isVisible = false">
+              取消
+            </t-button>
+            <t-button
+              theme="primary"
+              type="submit"
+              :disabled="isUpdating || isUnchanged"
+              :loading="isUpdating"
+            >
+              保存
+            </t-button>
+          </div>
         </div>
-      </div>
-    </form>
+      </template>
+    </KeyForm>
   </t-dialog>
 </template>
+
+<style scoped>
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 40px;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .dialog-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dialog-buttons {
+    justify-content: stretch;
+  }
+}
+</style>

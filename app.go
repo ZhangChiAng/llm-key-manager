@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
-	"errors"
-	"strconv"
-	"strings"
-	"time"
+
+	"llm-key-manager/internal/keystore"
+	"llm-key-manager/internal/probe"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -15,6 +13,7 @@ import (
 type App struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+	store  keystore.Store
 }
 
 // KeyRecord describes API key metadata returned to the frontend.
@@ -31,6 +30,12 @@ type KeyRecord struct {
 	CreatedAt string `json:"createdAt"`
 	// UpdatedAt records when the key metadata or encrypted value last changed in RFC3339 format.
 	UpdatedAt string `json:"updatedAt"`
+}
+
+// KeyProbeResult contains only a safe, transient conclusion.
+// Available means the preset model generated a response at the time of the probe.
+type KeyProbeResult struct {
+	Status string `json:"status"`
 }
 
 // NewApp creates a new App application struct
@@ -51,48 +56,19 @@ func (a *App) shutdown(_ context.Context) {
 
 // SaveKey stores an encrypted API key after the frontend validates required fields.
 func (a *App) SaveKey(provider string, name string, value string) error {
-	provider = strings.TrimSpace(provider)
-	name = strings.TrimSpace(name)
-	value = strings.TrimSpace(value)
-
-	records, err := readStoredKeys()
-	if err != nil {
-		return err
-	}
-
-	if err := ensureUniqueKeyRecord(records, "", provider, name, value); err != nil {
-		return err
-	}
-
-	protectedValue, err := protectKeyValue(value)
-	if err != nil {
-		return err
-	}
-
-	now := time.Now()
-	timestamp := now.Format(time.RFC3339)
-	records = append(records, storedKeyRecord{
-		ID:             strconv.FormatInt(now.UnixNano(), 10),
-		Provider:       provider,
-		Name:           name,
-		EncryptedValue: base64.StdEncoding.EncodeToString(protectedValue),
-		CreatedAt:      timestamp,
-		UpdatedAt:      timestamp,
-	})
-
-	return writeStoredKeys(records)
+	return a.store.Add(provider, name, value)
 }
 
 // ListKeys returns all locally saved API keys with masked values only.
 func (a *App) ListKeys() ([]KeyRecord, error) {
-	storedRecords, err := readStoredKeys()
+	storedRecords, err := a.store.List()
 	if err != nil {
 		return nil, err
 	}
 
 	records := make([]KeyRecord, 0, len(storedRecords))
 	for _, record := range storedRecords {
-		value, err := decryptStoredValue(record)
+		value, err := record.Masked()
 		if err != nil {
 			return nil, err
 		}
@@ -101,7 +77,7 @@ func (a *App) ListKeys() ([]KeyRecord, error) {
 			ID:          record.ID,
 			Provider:    record.Provider,
 			Name:        record.Name,
-			MaskedValue: maskKeyValue(value),
+			MaskedValue: value,
 			CreatedAt:   record.CreatedAt,
 			UpdatedAt:   record.UpdatedAt,
 		})
@@ -113,110 +89,49 @@ func (a *App) ListKeys() ([]KeyRecord, error) {
 // UpdateKey updates frontend-validated metadata and optionally replaces the encrypted key value.
 // An empty value preserves the existing encrypted key.
 func (a *App) UpdateKey(id string, provider string, name string, value string) error {
-	provider = strings.TrimSpace(provider)
-	name = strings.TrimSpace(name)
-	value = strings.TrimSpace(value)
-
-	records, err := readStoredKeys()
-	if err != nil {
-		return err
-	}
-
-	recordIndex := -1
-	var currentRecord storedKeyRecord
-	for index, record := range records {
-		if record.ID != id {
-			continue
-		}
-
-		recordIndex = index
-		currentRecord = record
-		break
-	}
-
-	if recordIndex == -1 {
-		return errors.New("key record not found")
-	}
-
-	providerChanged := strings.TrimSpace(currentRecord.Provider) != provider
-	nameChanged := strings.TrimSpace(currentRecord.Name) != name
-	valueChanged := value != ""
-	if !providerChanged && !nameChanged && !valueChanged {
-		return nil
-	}
-
-	effectiveValue := value
-	if effectiveValue == "" {
-		effectiveValue, err = decryptStoredValue(currentRecord)
-		if err != nil {
-			return err
-		}
-	}
-
-	if err := ensureUniqueKeyRecord(records, id, provider, name, effectiveValue); err != nil {
-		return err
-	}
-
-	if valueChanged {
-		protectedValue, err := protectKeyValue(effectiveValue)
-		if err != nil {
-			return err
-		}
-		currentRecord.EncryptedValue = base64.StdEncoding.EncodeToString(protectedValue)
-	}
-
-	currentRecord.Provider = provider
-	currentRecord.Name = name
-	currentRecord.UpdatedAt = time.Now().Format(time.RFC3339)
-	records[recordIndex] = currentRecord
-
-	return writeStoredKeys(records)
+	return a.store.Update(id, provider, name, value)
 }
 
 // CopyKey decrypts the saved API key and writes the plaintext to the clipboard.
 func (a *App) CopyKey(id string) error {
-	records, err := readStoredKeys()
+	record, err := a.store.Get(id)
 	if err != nil {
 		return err
 	}
-
-	for _, record := range records {
-		if record.ID != id {
-			continue
-		}
-
-		value, err := decryptStoredValue(record)
-		if err != nil {
-			return err
-		}
-
-		return runtime.ClipboardSetText(a.ctx, value)
+	value, err := record.Reveal()
+	if err != nil {
+		return err
 	}
-
-	return errors.New("key record not found")
+	return runtime.ClipboardSetText(a.ctx, value)
 }
 
-// DeleteKey removes the saved API key matching the provided record ID.
+// DeleteKey removes all saved API keys matching the provided record ID.
 func (a *App) DeleteKey(id string) error {
-	records, err := readStoredKeys()
+	return a.store.Delete(id)
+}
+
+// ListProviderPresets supplies the fixed provider names used by suggestions and probes.
+func (a *App) ListProviderPresets() []string {
+	return probe.ProviderNames()
+}
+
+// ProbeKey decrypts a saved key only in the backend and makes one billable request.
+// It never persists results or returns response bodies, headers, or network errors.
+func (a *App) ProbeKey(id string) (KeyProbeResult, error) {
+	result := KeyProbeResult{Status: string(probe.Failed)}
+	record, err := a.store.Get(id)
 	if err != nil {
-		return err
+		return result, err
 	}
-
-	nextRecords := make([]storedKeyRecord, 0, len(records))
-	found := false
-	for _, record := range records {
-		if record.ID == id {
-			found = true
-			continue
-		}
-
-		nextRecords = append(nextRecords, record)
+	// Match metadata first: unsupported providers must not attempt decryption.
+	if !probe.Supports(record.Provider) {
+		result.Status = string(probe.Unsupported)
+		return result, nil
 	}
-
-	if !found {
-		return errors.New("key record not found")
+	value, err := record.Reveal()
+	if err != nil {
+		return result, err
 	}
-
-	return writeStoredKeys(nextRecords)
+	result.Status = string(probe.Check(a.ctx, record.Provider, value))
+	return result, nil
 }

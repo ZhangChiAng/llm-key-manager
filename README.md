@@ -1,140 +1,108 @@
 # LLM Key Manager
 
-LLM Key Manager 是一个面向 Windows 和 macOS 的本地 API Key 管理桌面应用，用于集中保存、查看、复制和维护大模型服务商的访问密钥。
+LLM Key Manager 是一个运行在 Windows 和 macOS 上的桌面应用，用来在自己的电脑上集中保管各家大模型服务商的 API Key。它适合手上有多个 Key、需要在不同工具之间来回粘贴的个人用户。数据只保存在本机，不做云同步。
 
-项目基于 Wails、Go、Vue 3 和 TypeScript 构建。密钥内容仅保存在本机，后端在 Windows 上使用 DPAPI、在 macOS 上使用 AES-256-GCM 加密落盘；前端列表只展示脱敏后的 Key，复制时由后端解密并写入系统剪贴板，避免把明文密钥作为列表数据返回给界面。
+## 能做什么
 
-## 功能特性
+保存一个 Key 时，填写提供商、名称和 Key 内容。提供商可以从预设里选，也可以直接输入别的名字。已保存的 Key 按提供商分组，最近修改的排在前面；提供商、名称和内容完全相同的 Key 不能重复保存。
 
-- 本地保存 API Key，支持记录提供商、名称和 Key 内容。
-- 按提供商分组展示已保存记录，并按更新时间排序。
-- 列表展示脱敏 Key，长 Key 保留前 10 位和后 4 位。
-- 支持编辑提供商、名称，或在需要时替换 Key 内容。
-- 支持一键复制明文 Key 到系统剪贴板。
-- 支持删除不再使用的 Key 记录。
-- 支持并行检测预设提供商的已保存 Key，逐条显示检测结论。
-- 保存前会检查相同提供商、名称和 Key 内容的重复记录。
+列表里只显示脱敏后的内容。需要使用时点“复制”，完整的 Key 会直接进入系统剪贴板。
 
-## 安全模型
+编辑时可以只改提供商或名称，Key 内容留空表示沿用原来的，填了新内容则替换。不需要的记录可以删除。
 
-当前版本采用本地单机安全模型：
+## 过期检测
 
-- 密钥文件位于当前用户的本机应用数据目录：Windows 为 `%LOCALAPPDATA%\LLM Key Manager\keys.json`，macOS 为 `~/Library/Application Support/LLM Key Manager/keys.json`。
-- Windows 上，Key 内容使用 Windows DPAPI 加密后再 Base64 编码保存。
-- macOS 上，Key 内容使用 AES-256-GCM 加密，随机 nonce 与密文拼接后 Base64 编码保存。32 字节主密钥在首次保存时随机生成，存放在登录钥匙串的通用密码项中（服务 `llm-key-manager`，账户 `master-key`），应用通过系统自带的 `/usr/bin/security` 读取；重新构建未签名应用后不会反复弹出钥匙串授权提示。删除该钥匙串项后，已保存的 Key 无法再解密。
-- 两个平台的解密能力都绑定当前系统用户，项目不提供云同步、远程备份或跨平台解密，`keys.json` 不能在 Windows 和 macOS 之间互相拷贝使用。
-- 前端 `ListKeys` 只接收脱敏后的 Key；复制明文 Key 时通过 Wails 后端直接写入剪贴板。
-- 如果 `keys.json` 被手动破坏为非法格式，应用会返回本地存储格式异常提示。
+点“过期检测”后，应用会用每个已保存的 Key 向对应服务商发送一次很小的生成请求，以此判断这个 Key 现在还能不能用。**这是真实的 API 请求，可能产生费用。**
 
-这不是团队级密钥保险箱，也不替代企业 KMS、密码管理器或集中审计系统。它更适合个人在 Windows 或 macOS 桌面上管理多个 LLM 客户端、工具或服务商所需的 API Key。
+只有下面三家预设提供商支持检测，每家使用固定的模型。其他提供商的 Key 会显示“不支持检测”，不会发出任何请求。
 
-## 技术栈
+| 提供商          | 检测用的模型      |
+| --------------- | ----------------- |
+| DeepSeek        | `deepseek-flash`  |
+| MiniMax（国内） | `MiniMax-M3`      |
+| OfoxAI          | `qwen/qwen-flash` |
 
-- 桌面框架：Wails v2
-- 后端：Go
-- 前端：Vue 3、TypeScript、Vite
-- UI 组件：TDesign Vue Next
-- 本地加密：Windows DPAPI；macOS AES-256-GCM（主密钥保存在钥匙串）
-- 目标平台：Windows、macOS
+每个 Key 最多等待 30 秒，结果是“可用”“认证失败”“余额不足”“权限受限”“限流”“检测失败”之一。“可用”只说明检测那一刻这个模型正常返回了内容；“余额不足”“限流”“检测失败”也不等于 Key 已经失效，可能只是账户或网络的暂时状况。
 
-## 界面与使用流程
+检测进行中不能新增、编辑或删除记录。检测结果不会保存，修改记录或重启应用后需要重新检测。
 
-应用主界面由两部分组成：
+## 数据存在哪里，有多安全
 
-1. 顶部表单用于新增 Key，需要填写提供商、Key 名称和 Key 内容。
-2. 下方列表按提供商分组展示已保存记录，可展开分组后执行编辑、复制或删除操作。
+所有记录保存在当前用户目录下的一个文件里：
 
-编辑记录时，Key 内容输入框默认留空；留空表示只更新提供商或名称，不修改已保存的密钥内容。
+- Windows：`%LOCALAPPDATA%\LLM Key Manager\keys.json`
+- macOS：`~/Library/Application Support/LLM Key Manager/keys.json`
 
-### 过期检测
+文件中只有 Key 内容是加密的，提供商、名称和时间以明文保存。Windows 上由系统的 DPAPI 以当前登录用户的身份加密；macOS 上用 AES-256-GCM 加密，主密钥存放在登录钥匙串里（服务 `llm-key-manager`，账户 `master-key`）。
 
-点击“过期检测”立即并行检测所有预设提供商的已保存 Key，每条发送一次真实请求，会产生少量 API 用量。展开提供商分组后，Key 内容旁会逐条显示转圈标记，完成后显示“可用”“认证失败”“余额不足”“权限受限”“限流”或“检测失败”。自定义提供商显示“不支持检测”，不会发送请求。
+因此解密离不开原来的系统账户：单独备份 `keys.json` 不足以恢复数据，文件也不能拿到另一台电脑、另一个账户或另一个系统上使用。在 macOS 上如果删除了钥匙串里的主密钥，已保存的 Key 将无法再解密。
 
-| 提供商          | 请求地址                                     | 固定模型          |
-| --------------- | -------------------------------------------- | ----------------- |
-| DeepSeek        | `https://api.deepseek.com/chat/completions`  | `deepseek-flash`  |
-| MiniMax（国内） | `https://api.minimax.cn/v1/chat/completions` | `MiniMax-M3`      |
-| OfoxAI          | `https://api.ofox.io/v1/chat/completions`    | `qwen/qwen-flash` |
+还有两点需要留意。复制出来的 Key 会留在系统剪贴板和剪贴板历史工具里，应用不会自动清除。这种保护也挡不住已经以你的身份在电脑上运行的恶意程序：它是个人工具，不是企业级的密钥管理系统。
 
-请求仅发送用户消息 `Hi`，使用 `stream: false`、`max_tokens: 1`，DeepSeek 和 MiniMax 显式关闭思考。每条请求最多等待 30 秒，随应用生命周期取消，不自动重试、切换模型或跟随重定向。密钥由后端解密并通过 Bearer 请求头发送给对应提供商，前端只传记录 ID、接收结论；不记录或展示请求头、明文密钥及原始响应体。
+## 开发指南
 
-“可用”仅表示当前固定模型返回了有效生成响应，输出达到长度限制也算成功。余额不足、限流、网络异常不能据此判为 Key 过期；模型不可用、异常响应及未知错误显示“检测失败”。固定模型名称可能随服务商调整，需在实际账户中确认可调用性。
+以下内容面向参与开发的人和 agent。各文件的作用、想改某个功能该看哪里，见[代码地图](docs/architecture.md)。
 
-检测期间禁用重复检测、保存、编辑和删除；没有可检测记录时禁用按钮。结果仅保存在本次运行的内存中，普通刷新保留未变更记录的结果，修改或删除后清除对应结果，重启后清空。检测不会更改存储格式或记录更新时间。
+应用基于 Wails v2，后端是 Go，前端是 Vue 3、TypeScript 和 TDesign。只支持 Windows 和 macOS。
 
-接口参考：[DeepSeek](https://api-docs.deepseek.com/api/create-chat-completion/)、[MiniMax](https://platform.minimax.cn/docs/api-reference/text-openai-api)、[MiniMax 错误码](https://platform.minimax.cn/docs/api-reference/errorcode)、[OfoxAI](https://ofox.ai/docs/api)。
+### 环境
 
-## 从源码构建
+开发和构建都在 macOS arm64 上进行，Windows 版本通过交叉编译得到。需要以下工具：
 
-当前仓库按 Windows 和 macOS 桌面应用维护。可以在 Linux 环境中交叉编译 Windows 产物；macOS 产物需在安装了 Xcode Command Line Tools 的 Mac 上构建。真实运行效果应分别在 Windows 和 macOS 桌面环境验证。
+| 工具                     | 版本       |
+| ------------------------ | ---------- |
+| Go                       | 1.26.4     |
+| Node.js                  | 22.23.5    |
+| Wails                    | v2.12.0    |
+| golangci-lint            | 2.15.0     |
+| Xcode Command Line Tools | 随系统版本 |
 
-准备前端依赖：
+使用 Node 22，最低为 22.13.0（ESLint 工具链要求）。
+
+[Go](https://go.dev/dl/) 和 [Node.js](https://nodejs.org/en/download) 从官网安装，其余用命令安装：
 
 ```bash
-cd frontend
-npm install
+xcode-select --install
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 ```
 
-构建 Windows 可执行文件：
+这些工具都要能从 `PATH` 找到。
+
+克隆仓库后安装前端依赖：
 
 ```bash
-cd ..
-GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64
+(cd frontend && npm ci)
 ```
 
-构建 Windows 安装包：
+### 检查与构建
+
+[scripts/check.sh](scripts/check.sh) 是唯一的检查入口，具体命令以脚本为准：
 
 ```bash
-GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform windows/amd64 -nsis
+scripts/check.sh          # 格式化，检查前端和文档，对 macOS 与 Windows 两个目标做 Go lint
+scripts/check.sh --build  # 在此基础上打包
 ```
 
-在 Mac 上构建 macOS 应用（同时包含 Apple Silicon 和 Intel 架构）：
+脚本不会安装依赖，也不会启动应用。`--build` 会先清空 `build/bin/`，然后生成：
 
-```bash
-GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local wails build -clean -platform darwin/universal
-```
+- `build/bin/llm-key-manager.app`：macOS universal（arm64 + x86_64）
+- `build/bin/llm-key-manager.exe`：Windows amd64 的裸可执行文件，不含安装包
 
-构建产物位于 `build/bin/`（Windows 为 `llm-key-manager.exe`，macOS 为 `llm-key-manager.app`）。
+Windows 上运行需要 WebView2 Runtime。`.app` 没有签名，拷贝到别的 Mac 上首次打开时可能被 Gatekeeper 拦截。
 
-## 开发检查
+整个 `build/` 目录不纳入版本控制，其中的图标和打包资源由 Wails 按需重新生成。
 
-前端检查：
+### 更新绑定
 
-```bash
-cd frontend
-npm run lint
-npm run format
-npm run build
-```
+`frontend/wailsjs/` 是 Wails 根据 `app.go` 生成的前端绑定，纳入版本控制。修改了 `App` 的导出方法或它们用到的结构体后，需要重新生成：
 
-后端检查：
+1. 确认 `frontend/dist` 存在。`main.go` 嵌入了它，缺失时 Go 代码无法编译；没有就先运行一次 `scripts/check.sh`。
+2. 运行 `GOTOOLCHAIN=local wails generate module`。
+3. 查看 `frontend/wailsjs/` 的改动是否符合预期，再运行 `scripts/check.sh --build`。
 
-```bash
-cd ..
-GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
-GOOS=windows GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
-GOOS=darwin CGO_ENABLED=0 GOCACHE=/tmp/go-build-cache GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache golangci-lint run ./...
-```
+`--build` 会比较打包前后的绑定。如果打包过程又改动了 `frontend/wailsjs/`，说明绑定没有提前更新，脚本会报错。
 
-更完整的开发说明见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+### 本地运行
 
-## 项目结构
-
-```text
-.
-├── app.go                  # Wails 后端绑定与密钥操作编排
-├── key_store.go            # 加密存储、重复检查和脱敏辅助函数
-├── main.go                 # Wails 应用入口与窗口配置
-├── platform_windows.go     # Windows DPAPI 加密/解密与存储目录
-├── platform_darwin.go      # macOS AES-GCM 加密/解密、钥匙串主密钥与存储目录
-├── platform_unsupported.go # 仅供 Linux 开发机类型检查的报错实现
-├── frontend/src/           # Vue 3 前端源码
-├── frontend/wailsjs/       # Wails 生成的前端绑定
-├── build/windows/          # Windows 打包资源
-├── build/darwin/           # macOS 打包资源
-└── docs/                   # 设计与实现说明
-```
-
-## 平台说明
-
-本项目支持 Windows 和 macOS 桌面，不支持 Linux 桌面。`platform_unsupported.go` 只用于让 Linux 开发机通过类型检查和 lint，在该环境调用存储会返回不支持错误。
+在仓库根目录运行 `wails dev`，或直接打开构建出的 `.app`。两种方式读写的都是上文所说的真实数据文件和钥匙串，没有单独的开发数据。`wails.json` 没有配置前端 watcher，前端改动后的热更新不保证可用。

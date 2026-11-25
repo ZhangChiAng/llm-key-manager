@@ -10,12 +10,21 @@ import {
 } from '../../wailsjs/go/main/App'
 import type { main } from '../../wailsjs/go/models'
 
-/** Manages saved key records, backend operations, and page-level feedback. */
+import type { ProbeDisplayState, ProbeStatus } from '../probeStatus'
+
+let shared: ReturnType<typeof createKeyManager> | undefined
+
+/** Returns the single key-manager state shared by this application's window. */
 export function useKeyManager() {
+  return (shared ??= createKeyManager())
+}
+
+/** Manages saved key records, backend operations, and page-level feedback. */
+function createKeyManager() {
   const providerPresets = ref<string[]>([])
   const presetsLoaded = ref(false)
   const isProbing = ref(false)
-  const probeStates = ref(new Map<string, string>())
+  const probeStates = ref(new Map<string, ProbeStatus | 'probing'>())
   const canProbe = computed(() => keys.value.some(isProbeSupported))
 
   function isProbeSupported(record: main.KeyRecord) {
@@ -41,7 +50,8 @@ export function useKeyManager() {
         records.map(async (record) => {
           try {
             const result = await ProbeKey(record.id)
-            probeStates.value.set(record.id, result.status)
+            /** The backend returns only the closed set of internal/probe Status values. */
+            probeStates.value.set(record.id, result.status as ProbeStatus)
           } catch (error) {
             probeStates.value.set(record.id, 'failed')
             errorMessage.value = getErrorMessage(error, '读取或解密 Key 失败')
@@ -53,7 +63,7 @@ export function useKeyManager() {
     }
   }
 
-  function probeState(record: main.KeyRecord) {
+  function probeState(record: main.KeyRecord): ProbeDisplayState {
     if (presetsLoaded.value && !isProbeSupported(record)) return 'unsupported'
     return probeStates.value.get(record.id) ?? ''
   }
@@ -78,6 +88,7 @@ export function useKeyManager() {
 
     try {
       const [records, presets] = await Promise.all([ListKeys(), ListProviderPresets()])
+      /** Keeps a probe result only if its record is identical to the one shown before. */
       const previous = new Map(keys.value.map((record) => [record.id, JSON.stringify(record)]))
       probeStates.value = new Map(
         records.flatMap((record) => {
