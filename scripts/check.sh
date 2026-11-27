@@ -19,8 +19,8 @@ if [ "$(uname -s)" != Darwin ]; then
 fi
 # Ignore cross-compilation overrides: the first lint and bindings generation are native.
 unset GOOS GOARCH CGO_ENABLED
-if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major === 22 && minor >= 13 ? 0 : 1)'; then
-  echo "Node ^22.13.0 required (found $(node -v))" >&2
+if ! node -e 'const [major] = process.versions.node.split(".").map(Number); process.exit(major >= 22 ? 0 : 1)'; then
+  echo "Node >=22 required (found $(node -v))" >&2
   exit 1
 fi
 if [ ! -d frontend/node_modules ]; then

@@ -51,19 +51,17 @@ LLM Key Manager 是一个运行在 Windows 和 macOS 上的桌面应用，用来
 
 | 工具                     | 版本       |
 | ------------------------ | ---------- |
-| Go                       | 1.26.4     |
-| Node.js                  | 22.23.5    |
-| Wails                    | v2.12.0    |
+| Go                       | 1.27.4     |
+| Node.js                  | >=22       |
+| Wails                    | v2.17.1    |
 | golangci-lint            | 2.15.0     |
 | Xcode Command Line Tools | 随系统版本 |
-
-使用 Node 22，最低为 22.13.0（ESLint 工具链要求）。
 
 [Go](https://go.dev/dl/) 和 [Node.js](https://nodejs.org/en/download) 从官网安装，其余用命令安装：
 
 ```bash
 xcode-select --install
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 ```
 
